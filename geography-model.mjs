@@ -91,6 +91,69 @@ function _geographyOf(place) {
 }
 if (typeof globalThis !== "undefined") globalThis._geographyOf = _geographyOf;
 
+// ── #Place model, Phase C — Geography: point|polygon|region + extent + geo-within ──
+// OBJECT-MODEL.md Axis 1 + Axis 3b. PURE point/polygon math (no deps). A place's
+// geography becomes first-class, a trip/destination's extent is DERIVED from the
+// places it contains (the "fuzzy boundary from its places"), and the OBJECTIVE
+// nesting relation (geo-within) becomes derivable — which is what makes
+// "is this sight inside Yellowstone?" and sight-contains-destination real.
+// Coordinate convention throughout: [lat, lng].
+function _bboxOfCoords(coords) {
+  var minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
+  coords.forEach(function (c) {
+    if (!c || typeof c[0] !== "number" || typeof c[1] !== "number") return;
+    if (c[0] < minLat) minLat = c[0]; if (c[0] > maxLat) maxLat = c[0];
+    if (c[1] < minLng) minLng = c[1]; if (c[1] > maxLng) maxLng = c[1];
+  });
+  return (minLat === Infinity) ? null : [minLat, minLng, maxLat, maxLng];
+}
+function _pointInBbox(pt, b) { return pt[0] >= b[0] && pt[0] <= b[2] && pt[1] >= b[1] && pt[1] <= b[3]; }
+function _pointInPolygon(pt, poly) {
+  var y = pt[0], x = pt[1], inside = false; // y=lat, x=lng
+  for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    var yi = poly[i][0], xi = poly[i][1], yj = poly[j][0], xj = poly[j][1];
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+// Normalize any place-like record to a PlaceGeo { type, lat?,lng?,polygon?,bbox? }.
+function geoOf(place) {
+  if (!place || typeof place !== "object") return { type: "point", lat: null, lng: null };
+  if (Array.isArray(place.polygon) && place.polygon.length >= 3) {
+    return { type: "polygon", polygon: place.polygon, bbox: _bboxOfCoords(place.polygon) };
+  }
+  if (Array.isArray(place.bbox) && place.bbox.length === 4) {
+    return { type: "region", bbox: place.bbox.slice() };
+  }
+  var lat = (typeof place.lat === "number") ? place.lat : null;
+  var lng = (typeof place.lng === "number") ? place.lng : null;
+  return { type: "point", lat: lat, lng: lng };
+}
+// Derive the extent (region bbox) of a set of places from their geometry.
+function extentOf(places) {
+  var pts = [];
+  (places || []).forEach(function (p) {
+    var g = geoOf(p);
+    if (g.type === "point" && g.lat != null && g.lng != null) pts.push([g.lat, g.lng]);
+    else if (g.polygon) g.polygon.forEach(function (c) { pts.push(c); });
+    else if (g.bbox) { pts.push([g.bbox[0], g.bbox[1]]); pts.push([g.bbox[2], g.bbox[3]]); }
+  });
+  var b = _bboxOfCoords(pts);
+  return b ? { type: "region", bbox: b } : null;
+}
+// geo-within: is `child` geographically inside `container`? OBJECTIVE nesting —
+// point-in-polygon when the container has a polygon, else point-in-bbox. A bare
+// point container has no extent, so it contains nothing.
+function geoWithin(child, container) {
+  var c = geoOf(child), box = geoOf(container);
+  var pt = (c.type === "point" && c.lat != null) ? [c.lat, c.lng]
+         : (c.bbox ? [(c.bbox[0] + c.bbox[2]) / 2, (c.bbox[1] + c.bbox[3]) / 2] : null);
+  if (!pt) return false;
+  if (box.polygon) return _pointInPolygon(pt, box.polygon);
+  if (box.bbox) return _pointInBbox(pt, box.bbox);
+  return false;
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // MaxRoleWriter — the single source of truth for writing a candidate's
 // role and its derived state. Mirrors the MaxMapPin pattern: 8 scattered
@@ -643,7 +706,13 @@ export {};
   const __expg = /** @type {any} */ (globalThis);
   __expg.MaxCandidates = MaxCandidates;
   __expg.MaxRoleWriter = MaxRoleWriter;
+  __expg._bboxOfCoords = _bboxOfCoords;
   __expg._geographyOf = _geographyOf;
   __expg._initialTripSave = _initialTripSave;
+  __expg._pointInBbox = _pointInBbox;
+  __expg._pointInPolygon = _pointInPolygon;
   __expg._recordWaysideLegDecision = _recordWaysideLegDecision;
+  __expg.extentOf = extentOf;
+  __expg.geoOf = geoOf;
+  __expg.geoWithin = geoWithin;
 }
