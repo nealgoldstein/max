@@ -923,4 +923,37 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     expect(r.hasThemed, 'the retried result produced a themed section').toBe(true);
   });
 
+  // ── #Place D root-cause OBSERVER (non-fatal): keep-shadow on a REAL pipeline ──
+  // The keepFor projection (place-registry.mjs) must equal the stored _keep flag
+  // the ENGINE actually writes, before we migrate the ~49 _keep readers and
+  // delete the MaxRoleWriter mirror. The pipeline above produced real
+  // placeActivities (stays + sights + day-trips + the Hverir overnight edge).
+  // Here we compare stored _keep vs keepFor across every requiredPlace. NON-FATAL:
+  // it logs the result so we can see whether real engine output already matches
+  // the projection; it never fails the gate. Promote to a hard assertion only
+  // once the wild proves clean.
+  test('OBSERVER: keep-shadow — stored _keep vs keepFor on a real pipeline trip', async ({ page }) => {
+    await bootClean(page);
+    await runPipeline(page);
+    const obs = await page.evaluate(() => {
+      const MP = window.MaxPlaces;
+      if (!MP || typeof MP.keepShadowCheck !== 'function') return { err: 'MaxPlaces.keepShadowCheck missing' };
+      const trip = (window.TripStore && window.TripStore.trip) || window.trip || {};
+      // Pre-publish the populated sections live on _tb; fall back to it.
+      const pa = (trip.placeActivities && trip.placeActivities.length) ? trip.placeActivities
+               : (window._tb && window._tb.placeActivities) || [];
+      const cands = (trip.candidates && trip.candidates.length) ? trip.candidates
+                  : (window._tb && window._tb.candidates) || [];
+      const r = MP.keepShadowCheck({ placeActivities: pa, candidates: cands }); // live _isStaySection / _placeOrigin
+      let rpCount = 0;
+      pa.forEach((it) => { if (it && it.type !== 'route') rpCount += (it.requiredPlaces || []).length; });
+      return { ok: r.ok, checked: r.checked, diffs: r.diffs, rpCount };
+    });
+    expect(obs.err || '').toBe('');
+    console.log('[keep-shadow] checked=' + obs.checked + ' requiredPlaces=' + obs.rpCount +
+                ' storedEqualsDerived=' + (obs.ok ? 'yes' : 'NO ' + JSON.stringify(obs.diffs)));
+    test.info().annotations.push({ type: 'keep-shadow', description: JSON.stringify(obs) });
+    expect(typeof obs.checked).toBe('number');   // assert only that the check RAN
+  });
+
 });
