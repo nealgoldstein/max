@@ -304,9 +304,27 @@ function togglePlaceActivity(id){
   var item = null;
   for(var i=0;i<items.length;i++){ if(items[i].id === id){ item = items[i]; break; } }
   if (!item) return;
-  var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && p._keep; });
+  // #Place D 2.5: route through MaxRoleWriter.set (the canonical writer) instead
+  // of writing p._keep directly. A direct write is reverted by the re-render's
+  // reconcile (which re-derives _keep from the decision); set() stamps the
+  // decision so the toggle STICKS and _keepOf stays authoritative. Mirrors the
+  // single-place path (_pmRemoveFromList / toggleDestKeep).
+  var _keepFn = (typeof _keepOf === "function") ? _keepOf : function(p){ return !!(p && p._keep); };
+  var anyKept = (item.requiredPlaces||[]).some(function(p){ return p && _keepFn(p); });
   var newKeep = !anyKept; // if anything was kept, turn all off; else turn all on
-  (item.requiredPlaces||[]).forEach(function(p){ if (p) p._keep = newKeep; });
+  if (typeof MaxRoleWriter !== "undefined" && MaxRoleWriter && typeof MaxRoleWriter.set === "function") {
+    // collect names first — set() works by name on _tb.candidates, so it is
+    // robust to any placeActivities rebuild a per-set emit might trigger.
+    var _names = (item.requiredPlaces||[]).map(function(p){ return p && p.place; }).filter(Boolean);
+    _names.forEach(function(nm){
+      if (typeof _pmEnsureCandidate === "function") _pmEnsureCandidate(nm);
+      var role = newKeep ? ((typeof _pmRoleForCheck === "function") ? _pmRoleForCheck(nm) : "see") : "maybe";
+      MaxRoleWriter.set(nm, role, { persist: false });   // batch: persist once below
+    });
+    if (typeof autoSave === "function") { try { autoSave(); } catch(_){} }
+  } else {
+    (item.requiredPlaces||[]).forEach(function(p){ if (p) p._keep = newKeep; }); // fallback
+  }
   item.checked = newKeep;
   _renderPlaceActivityItems();
   _updatePlaceActivitySummary();
