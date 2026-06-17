@@ -10711,7 +10711,17 @@ function _keepOf(p){
   if (typeof MaxDecisions === "undefined" || !MaxDecisions || typeof MaxDecisions.keepOf !== "function") return !!p._keep;
   var _o = (typeof window._placeOrigin === "function") ? window._placeOrigin(p) : (p._origin || "max");
   var _d = (typeof _tb !== "undefined" && _tb && _tb._decisions && typeof _tb._decisions.get === "function") ? _tb._decisions.get(p.place) : null;
-  return MaxDecisions.keepOf({ origin: _o }, _d || null);
+  if (_d) return MaxDecisions.keepOf({ origin: _o }, _d);
+  // #Place D: no decision-log entry for this place — prefer the PERSISTED
+  // decision (the stored _keep) over a blind origin default. This makes _keepOf
+  // a safe no-op replacement for every raw `p._keep` read in EVERY context,
+  // including post-reload when the log may not have fully restored: log present
+  // → derive (proven == stored, [keep-3way] 16/16); log sparse → return the
+  // saved flag verbatim. The stored flag retires only once the log is proven
+  // complete (OBJECT-MODEL.md §7 step 3); until then _keepOf CENTRALIZES the
+  // _keep dependency in this one function instead of 49 scattered reads.
+  if (typeof p._keep === "boolean") return p._keep;
+  return MaxDecisions.keepOf({ origin: _o }, null);
 }
 if (typeof globalThis !== "undefined") globalThis._keepOf = _keepOf;
 
