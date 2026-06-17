@@ -193,12 +193,55 @@ function candidateMirrorCheck(trip) {
   return { ok: mismatches.length === 0, checked: checked, mismatches: mismatches };
 }
 
+// DIAGNOSTIC scan (looser). candidateMirrorCheck matches by canonical key —
+// EXACTLY as MaxRoleWriter's flag-sync does — so it is blind to the PD.86 gap
+// where the two normalizers disagree: resolve("Gullfoss") = "gullfoss" but
+// resolve("Gullfoss, Iceland") = "gullfoss iceland", so the role is set on the
+// candidate and the requiredPlace flag never flips (the gray-pin bug). This
+// scan matches with PlaceKey.relatedTo — THE identity relation the rest of the
+// app uses (token-overlap + word-prefix containment) — and reports decided
+// candidates whose decision did NOT reach a RELATED requiredPlace. It only
+// considers pairs the strict KEY missed (else candidateMirrorCheck covers
+// them), so the two never double-count. A non-empty result is a LIVE
+// normalizer-gap bug. Observer-only; never a gate.
+function candidateMirrorScan(trip) {
+  var suspects = [];
+  var cands = (trip && trip.candidates) || [];
+  var rps = [];
+  ((trip && trip.placeActivities) || []).forEach(function (it) {
+    if (!it || it.type === "route") return;
+    (it.requiredPlaces || []).forEach(function (p) { if (p && (p.place || p.name)) rps.push(p); });
+  });
+  if (!rps.length) return { ok: true, suspects: [] };
+  var hasRel = !!(PlaceKey && typeof PlaceKey.relatedTo === "function");
+  cands.forEach(function (c) {
+    if (!_cmDecided(c)) return;
+    var cn = c && c.place; if (!cn) return;
+    var exactKey = _regKey(cn);
+    var expKeep = _cmKept(c), expRej = _cmRejected(c), expDay = (c.role === "daytrip");
+    rps.forEach(function (p) {
+      var pn = p.place || p.name;
+      if (_regKey(pn) === exactKey) return;           // strict check already owns this pair
+      var related = false;
+      if (hasRel) { try { related = PlaceKey.relatedTo(cn, pn); } catch (_) {} }
+      if (!related) return;
+      var bad = [];
+      if (!!p._keep !== expKeep) bad.push("_keep");
+      if (!!p._rejected !== expRej) bad.push("_rejected");
+      if (!!p._isDayTrip !== expDay) bad.push("_isDayTrip");
+      if (bad.length) suspects.push({ candidate: cn, requiredPlace: pn, fields: bad, candKey: exactKey, rpKey: _regKey(pn) });
+    });
+  });
+  return { ok: suspects.length === 0, suspects: suspects };
+}
+
 var MaxPlaces = {
   buildRegistry: buildRegistry,
   registryShadowCheck: registryShadowCheck,
   destinationsOf: destinationsOf,
   destinationsProjectionCheck: destinationsProjectionCheck,
-  candidateMirrorCheck: candidateMirrorCheck
+  candidateMirrorCheck: candidateMirrorCheck,
+  candidateMirrorScan: candidateMirrorScan
 };
 
 export { MaxPlaces };
@@ -219,6 +262,7 @@ export default MaxPlaces;
   __expg._regKey = _regKey;
   __expg.buildRegistry = buildRegistry;
   __expg.candidateMirrorCheck = candidateMirrorCheck;
+  __expg.candidateMirrorScan = candidateMirrorScan;
   __expg.destinationsOf = destinationsOf;
   __expg.destinationsProjectionCheck = destinationsProjectionCheck;
   __expg.registryShadowCheck = registryShadowCheck;

@@ -93,13 +93,31 @@ test('OBSERVER: candidate↔requiredPlace mirror drift after a live role change'
       }
     } catch (e) { /* observation only */ }
     const r = MP.candidateMirrorCheck(trip);
-    return { drove, ok: r.ok, checked: r.checked, mismatches: r.mismatches };
+    const scan = (typeof MP.candidateMirrorScan === 'function') ? MP.candidateMirrorScan(trip) : { ok: true, suspects: [] };
+    // Inventory: so checked=0 is never ambiguous — we can SEE whether the
+    // suffixed requiredPlace exists and what key it resolved to.
+    const PK = window.PlaceKey;
+    const rpInv = [];
+    (trip.placeActivities || []).forEach((it) => {
+      if (!it || it.type === 'route') return;
+      (it.requiredPlaces || []).forEach((p) => {
+        if (!p) return;
+        rpInv.push({ place: p.place || p.name, key: PK ? PK.resolve(p.place || p.name) : null,
+                     _keep: !!p._keep, _isDayTrip: !!p._isDayTrip, _rejected: !!p._rejected });
+      });
+    });
+    const candInv = (trip.candidates || []).map((c) => ({ place: c.place, role: c.role, status: c.status, key: PK ? PK.resolve(c.place) : null }));
+    return { drove, ok: r.ok, checked: r.checked, mismatches: r.mismatches,
+             scanOk: scan.ok, suspects: scan.suspects, candInv, rpInv };
   });
 
   expect(obs.err || '').toBe('');
   // NON-FATAL: report, never fail. CI log shows the measurement.
   console.log('[mirror-observer] drove=' + obs.drove + ' checked=' + obs.checked +
-              ' drift=' + (obs.ok ? 'none' : JSON.stringify(obs.mismatches)));
+              ' strictDrift=' + (obs.ok ? 'none' : JSON.stringify(obs.mismatches)) +
+              ' scanDrift=' + (obs.scanOk ? 'none' : JSON.stringify(obs.suspects)));
+  console.log('[mirror-observer] candidates=' + JSON.stringify(obs.candInv));
+  console.log('[mirror-observer] requiredPlaces=' + JSON.stringify(obs.rpInv));
   test.info().annotations.push({ type: 'mirror-drift', description: JSON.stringify(obs) });
   expect(typeof obs.checked).toBe('number'); // assert only that the check RAN
 });

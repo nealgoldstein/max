@@ -152,6 +152,56 @@ test("a decided candidate with NO matching requiredPlace is skipped (no false po
   assert.strictEqual(r.checked, 0);
 });
 
+// ── the looser RELATEDTO scan: catches the PD.86 normalizer gap the strict
+// key-matched check is blind to ("Gullfoss" vs "Gullfoss, Iceland"). ──────────
+console.log("\n#Place high-value arc — relatedTo mirror-drift SCAN (PD.86 gap)");
+
+function suffixGapTrip(rpFlags) {
+  // candidate "Gullfoss" decided daytrip; requiredPlace carries a country
+  // suffix so resolve() keys differ — the strict check can't pair them.
+  return {
+    candidates: [{ place: "Gullfoss", role: "daytrip", status: "keep", dayTripHub: "Reykjavik" }],
+    placeActivities: [
+      { type: "activity", requiredPlaces: [Object.assign({ place: "Gullfoss, Iceland" }, rpFlags)] }
+    ]
+  };
+}
+
+test("strict check is BLIND to the suffix gap (keys differ → checked=0)", function () {
+  var r = MaxPlaces.candidateMirrorCheck(suffixGapTrip({ _keep: false, _isDayTrip: false }));
+  assert.strictEqual(r.checked, 0, "strict check must not pair across the suffix gap");
+  assert.ok(r.ok, "and therefore reports no drift");
+});
+test("SCAN catches the suffix-gap drift (daytrip role didn't reach requiredPlace)", function () {
+  var r = MaxPlaces.candidateMirrorScan(suffixGapTrip({ _keep: false, _isDayTrip: false }));
+  assert.ok(!r.ok, "scan should flag the gap");
+  assert.strictEqual(r.suspects.length, 1);
+  assert.strictEqual(r.suspects[0].candidate, "Gullfoss");
+  assert.strictEqual(r.suspects[0].requiredPlace, "Gullfoss, Iceland");
+  assert.ok(r.suspects[0].fields.indexOf("_isDayTrip") >= 0);
+  assert.ok(r.suspects[0].fields.indexOf("_keep") >= 0);
+});
+test("SCAN is clean when the suffixed requiredPlace DID get the right flags", function () {
+  var r = MaxPlaces.candidateMirrorScan(suffixGapTrip({ _keep: true, _isDayTrip: true, _rejected: false }));
+  assert.ok(r.ok, "no drift: related place carries correct flags");
+});
+test("SCAN does not flag genuinely unrelated places", function () {
+  var t = {
+    candidates: [{ place: "Gullfoss", role: "see", status: "keep" }],
+    placeActivities: [{ type: "activity", requiredPlaces: [{ place: "Akureyri Harbour", _keep: false }] }]
+  };
+  assert.ok(MaxPlaces.candidateMirrorScan(t).ok);
+});
+test("SCAN skips pairs the strict key already owns (no double-count)", function () {
+  // exact same key on both sides → scan defers to the strict check
+  var t = {
+    candidates: [{ place: "Gullfoss", role: "daytrip", status: "keep" }],
+    placeActivities: [{ type: "activity", requiredPlaces: [{ place: "Gullfoss", _keep: false, _isDayTrip: false }] }]
+  };
+  assert.ok(MaxPlaces.candidateMirrorScan(t).ok, "scan must ignore exact-key pairs");
+  assert.ok(!MaxPlaces.candidateMirrorCheck(t).ok, "strict check owns that drift");
+});
+
 console.log("\n──────────────────────────────────────────────────");
 console.log("PASS: " + pass + "    FAIL: " + fail);
 process.exit(fail > 0 ? 1 : 0);
