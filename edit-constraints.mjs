@@ -1069,7 +1069,7 @@ async function previewConstraintChanges(){
     var candCount = (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.candidates)) ? _tb.candidates.length : 0;
     var keptCount = (typeof _tb !== "undefined" && _tb && Array.isArray(_tb.placeActivities))
       ? _tb.placeActivities.reduce(function(s, it){
-          return s + ((it.requiredPlaces||[]).filter(function(p){ return p && p._keep; }).length);
+          return s + ((it.requiredPlaces||[]).filter(function(p){ return p && (typeof _keepOf === "function" ? _keepOf(p) : p._keep); }).length);
         }, 0)
       : 0;
     if (candCount || keptCount) {
@@ -1993,7 +1993,7 @@ function reopenPickerForEdit(){
           nights: typeof p.nights === "number" ? p.nights : 2,
           lat: (typeof p.lat === "number") ? p.lat : null,
           lng: (typeof p.lng === "number") ? p.lng : null,
-          _keep: (p._keep !== false),
+          _keep: (typeof _keepOf === "function" ? _keepOf(p) : p._keep !== false),
           // PD.378: provenance + verdict flags MUST survive the
           // reopen clone. This whitelist silently dropped
           // _autoCreated (so the stays rebuild wiped synthesized
@@ -2449,7 +2449,7 @@ async function saveActivityPickerEdits(){
   // pass shows it with its places ready to be re-checked.
   var items = (_tb.placeActivities||[]).map(function(i){
     var allPlaces = (i.requiredPlaces||[]).map(function(p){
-      var clean = {place: p.place, country: p.country, _keep: !!p._keep};
+      var clean = {place: p.place, country: p.country, _keep: (typeof _keepOf === "function" ? _keepOf(p) : !!p._keep)};
       if (typeof p.nights === "number") clean.nights = p.nights;
       if (typeof p.lat === "number") clean.lat = p.lat;
       if (typeof p.lng === "number") clean.lng = p.lng;

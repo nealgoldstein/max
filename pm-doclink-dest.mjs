@@ -187,7 +187,7 @@ function toggleDestKeep(placeName){
   var anyKept = false;
   (_tb.placeActivities || []).forEach(function(item){
     (item.requiredPlaces || []).forEach(function(p){
-      if (p && p.place && nf(p.place) === key && p._keep) anyKept = true;
+      if (p && p.place && nf(p.place) === key && (typeof _keepOf === "function" ? _keepOf(p) : p._keep)) anyKept = true;
     });
   });
   var nextRole = anyKept ? "maybe" : _pmRoleForCheck(placeName);
@@ -224,7 +224,7 @@ function _pmSurgicalKeepUpdate(placeName){
     var pk = nf(placeName);
     var kept = false;
     (_tb && _tb.placeActivities || []).forEach(function(it){
-      (it && it.requiredPlaces || []).forEach(function(p){ if (p && p.place && nf(p.place) === pk && p._keep) kept = true; });
+      (it && it.requiredPlaces || []).forEach(function(p){ if (p && p.place && nf(p.place) === pk && (typeof _keepOf === "function" ? _keepOf(p) : p._keep)) kept = true; });
     });
     var listEl = (typeof document !== "undefined") && document.getElementById("tb-place-act-list");
     if (!listEl) return;

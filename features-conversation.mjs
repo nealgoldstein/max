@@ -1045,7 +1045,7 @@ function showAskMaxModal() {
     var _region = (_tb && _tb.region) || (_tb && _tb.placeName) || "your trip";
     var _picksCount = 0;
     (_tb && _tb.placeActivities || []).forEach(function(it){
-      (it.requiredPlaces || []).forEach(function(p){ if (p && p._keep) _picksCount++; });
+      (it.requiredPlaces || []).forEach(function(p){ if (p && (typeof _keepOf === "function" ? _keepOf(p) : p._keep)) _picksCount++; });
     });
     ctxLine.textContent = "Context: Planning " + _region + (_picksCount ? " — " + _picksCount + " picks so far" : " — picking places");
   }
@@ -1263,7 +1263,7 @@ function _buildAskMaxSystemPrompt() {
     var _keptPlaces = [];
     (_tb.placeActivities || []).forEach(function(it){
       (it.requiredPlaces || []).forEach(function(p){
-        if (p && p._keep && p.place && _keptPlaces.indexOf(p.place) < 0) _keptPlaces.push(p.place);
+        if (p && (typeof _keepOf === "function" ? _keepOf(p) : p._keep) && p.place && _keptPlaces.indexOf(p.place) < 0) _keptPlaces.push(p.place);
       });
     });
     if (_keptPlaces.length) pBits.push("Kept picks (" + _keptPlaces.length + "): " + _keptPlaces.join(", "));
