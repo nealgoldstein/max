@@ -2,6 +2,7 @@
 import { MaxRoute } from "./engine-routing.mjs";
 import { MaxGeo } from "./engine-geo.mjs";
 import { MaxEnrich } from "./engine-enrich.mjs";
+import { MaxPlaces } from "./place-registry.mjs"; // #Place D cutover: destinations access layer
 import { MaxBuild } from "./engine-build.mjs";
 import MaxDB from "./db.mjs";
 // edit-constraints.js — re-open Step 1 (brief) from within planning. Extracted from
@@ -1035,8 +1036,8 @@ async function previewConstraintChanges(){
     +'</div>';
 
   // Build trip context summary — include booking counts so Max can flag invalidations
-  var destNames = (trip.destinations||[]).map(function(d){ return d.city+(d.country?", "+d.country:""); }).join("; ");
-  var destList = (trip.destinations||[]).map(function(d, i){
+  var destNames = MaxPlaces.destinationsOf(trip).map(function(d){ return d.city+(d.country?", "+d.country:""); }).join("; ");
+  var destList = MaxPlaces.destinationsOf(trip).map(function(d, i){
     var bookCount = (d.hotelBookings||[]).length + (d.generalBookings||[]).length;
     return (i+1) + ". " + d.place + (d.dateFrom ? " (" + d.dateFrom + " to " + d.dateTo + ")" : "") + (bookCount ? " \u2014 " + bookCount + " booking(s)" : "");
   }).join("\n");

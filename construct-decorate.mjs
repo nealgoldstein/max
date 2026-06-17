@@ -2,6 +2,7 @@
 import { MaxGenPrompt } from "./gen-prompt.mjs";
 import { MaxEnrich } from "./engine-enrich.mjs";
 import { DiscoveryModel } from "./discovery-model.mjs";
+import { MaxPlaces } from "./place-registry.mjs"; // #Place D cutover: destinations access layer
 import MaxData from "./max-data.mjs";
 import PlaceKey from "./place-key.mjs";
 import { _escHtml } from "./util-esc.mjs";
@@ -788,7 +789,7 @@ if (typeof globalThis !== "undefined") globalThis._reconcileListedSightsToSectio
 // reflect what the user actually committed to.
 function validateTripRoute() {
   if (typeof trip === "undefined" || !trip
-      || !Array.isArray(trip.destinations) || trip.destinations.length < 2) {
+      || MaxPlaces.destinationsOf(trip).length < 2) {
     if (typeof maxAlert === "function") {
       maxAlert("Need at least two destinations to validate the route.");
     }
@@ -805,7 +806,7 @@ function validateTripRoute() {
   // Build the kept-candidate shape the realism check expects.
   // Day trips have intent="dayTrip" so they're excluded from
   // segment distance calculations.
-  var orderedKeeps = trip.destinations.map(function(d){
+  var orderedKeeps = MaxPlaces.destinationsOf(trip).map(function(d){
     if (!d) return null;
     return {
       place: d.place || "",
