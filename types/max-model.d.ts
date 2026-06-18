@@ -40,6 +40,8 @@ declare var TripStore: any;
 declare var MaxDB: any;
 declare var MaxDecisions: any;
 declare var MaxPlaces: any;
+declare var MaxBackup: any;
+declare var MaxErrors: any;
 declare var MaxDiscovery: any;
 declare var MaxEnginePicker: any;
 declare var MaxEngineTrip: any;

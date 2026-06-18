@@ -208,6 +208,14 @@ function selectHomeOption(id){
     setTimeout(function(){ g("hs-trips-section").scrollIntoView({behavior:"smooth",block:"nearest"}); }, 80);
   } else if(id === "import"){
     openTripFile();
+  } else if(id === "backup"){
+    // Operational safety net: download a recovery copy of every trip (MaxBackup).
+    if (typeof MaxBackup !== "undefined" && MaxBackup && typeof MaxBackup.exportAll === "function") {
+      var _bk = MaxBackup.exportAll();
+      if (typeof maxAlert === "function") {
+        maxAlert("Backed up " + ((_bk && _bk.trips) || 0) + " trip(s) — saved to your downloads.");
+      }
+    }
   } else if(id === "paste"){
     // v359.60.26: paste-a-list flow mints a stub trip and routes
     // straight through the picker — each pasted place is enriched by

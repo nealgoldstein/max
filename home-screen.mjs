@@ -939,6 +939,9 @@ function renderHomeOptions(){
     options.push({id:"resume", label:"Pick up where you left off",          sub:"Continue working on one of your trips"});
   }
   options.push({id:"import", label:"Load a trip from a file",              sub:"Import a saved Max trip file"});
+  if(hasTrips){
+    options.push({id:"backup", label:"Back up all trips to a file",          sub:"Download a recovery copy of every trip"});
+  }
   options.push({id:"browse", label:"Or just browse — I’m not planning yet", sub:"Look at places, dream a little, no commitment"});
 
   opts.innerHTML = options.map(function(o){
