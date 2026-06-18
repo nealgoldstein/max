@@ -31,6 +31,23 @@ import {
   totalTokens,
 } from '../lib/usage.js';
 
+// Build the ordered, de-duped model fallback chain from env. Exported for unit
+// testing. Precedence: MAX_MODEL → MAX_MODEL_FALLBACKS (comma-separated) →
+// built-in defaults (current models). Empty/blank entries are ignored.
+export function buildModelChain(
+  env: Record<string, string | undefined>,
+): string[] {
+  const out: string[] = [];
+  const push = (m?: string) => {
+    const v = (m || '').trim();
+    if (v && !out.includes(v)) out.push(v);
+  };
+  push(env.MAX_MODEL);
+  (env.MAX_MODEL_FALLBACKS || '').split(',').forEach(push);
+  ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'].forEach(push);
+  return out;
+}
+
 const llmApi = new Hono<AuthContext>();
 llmApi.use('*', requireAuth);
 
@@ -102,38 +119,71 @@ llmApi.post('/messages', async (c) => {
     );
   }
 
+  // MODEL RESILIENCE — the model is chosen HERE (server-authoritative), not by
+  // the client. Two payoffs:
+  //   1. A retired/changed model is fixed by ONE env update (MAX_MODEL secret) —
+  //      no frontend rebuild, and even already-open browsers pick it up on their
+  //      next call, since the server overrides whatever model they send.
+  //   2. Graceful fallback chain: if a model 404s with Anthropic's
+  //      not_found_error (what a retired/unknown model returns), we transparently
+  //      retry the next model so the AI degrades instead of dying — and log a
+  //      loud error so the operator knows to refresh MAX_MODEL.
+  // Chain = MAX_MODEL, then MAX_MODEL_FALLBACKS (comma-separated), then a
+  // built-in default of current models. De-duped, order preserved.
+  const modelChain = buildModelChain(env);
+
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    });
+    let data: Record<string, unknown> = {
+      error: { type: 'proxy_error', message: 'No model available' },
+    };
+    let status = 502;
+    for (let i = 0; i < modelChain.length; i++) {
+      const model = modelChain[i];
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        // Override the client's model with the server's choice.
+        body: JSON.stringify({ ...body, model }),
+      });
 
-    const data = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
+      data = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
+      status = resp.status;
 
-    // v350: increment usage on a successful call. Anthropic returns
-    // a `usage` block with input_tokens, output_tokens, and cache
-    // counters. Fire-and-forget the DB write — don't make the user
-    // wait, and don't 500 the response if it fails.
-    if (resp.ok && data && typeof data === 'object' && 'usage' in data) {
-      const u = (data as { usage?: Record<string, number> }).usage || {};
-      // Don't await — fire-and-forget. ctx.waitUntil would be ideal
-      // on Workers but Hono's Node adapter doesn't expose it
-      // uniformly; the DB write is fast enough that this rarely
-      // matters in practice.
-      void incrementUsage(user.id, {
-        inputTokens: u.input_tokens || 0,
-        outputTokens: u.output_tokens || 0,
-        cacheCreationTokens: u.cache_creation_input_tokens || 0,
-        cacheReadTokens: u.cache_read_input_tokens || 0,
-      }).catch((e) => console.error('[max] usage increment failed:', e));
+      // Retired/unknown model → Anthropic returns 404 not_found_error. Fall
+      // through to the next model in the chain rather than surfacing dead-AI.
+      const errObj = (data as { error?: { type?: string } }).error;
+      const modelMissing =
+        resp.status === 404 && !!errObj && errObj.type === 'not_found_error';
+      if (modelMissing && i < modelChain.length - 1) {
+        console.error(
+          '[max] LLM model "' +
+            model +
+            '" rejected (not_found) — falling back to "' +
+            modelChain[i + 1] +
+            '". Update the MAX_MODEL secret.',
+        );
+        continue;
+      }
+
+      // v350: increment usage on a successful call. Anthropic returns a `usage`
+      // block. Fire-and-forget — don't make the user wait or 500 on a DB miss.
+      if (resp.ok && data && typeof data === 'object' && 'usage' in data) {
+        const u = (data as { usage?: Record<string, number> }).usage || {};
+        void incrementUsage(user.id, {
+          inputTokens: u.input_tokens || 0,
+          outputTokens: u.output_tokens || 0,
+          cacheCreationTokens: u.cache_creation_input_tokens || 0,
+          cacheReadTokens: u.cache_read_input_tokens || 0,
+        }).catch((e) => console.error('[max] usage increment failed:', e));
+      }
+      break; // success, or a non-model error to surface as-is
     }
 
-    return c.json(data, resp.status as Parameters<typeof c.json>[1]);
+    return c.json(data, status as Parameters<typeof c.json>[1]);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'LLM proxy fetch failed';
     return c.json({ error: { type: 'proxy_error', message } }, 502);
