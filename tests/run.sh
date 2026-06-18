@@ -21,6 +21,7 @@ node tests/contract-checks.js
 node tests/canonical-placeset-tests.js
 node tests/place-key-tests.js
 node tests/place-registry-tests.mjs
+node tests/place-invariants-fuzz.mjs
 node tests/section-kind-tests.js
 node tests/discovery-model-tests.js
 node tests/discovery-ingestion-tests.js
