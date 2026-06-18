@@ -79,12 +79,26 @@ var built = esbuild.buildSync({
 });
 var bundle = built.outputFiles[0].text;
 
+var crypto = require("crypto");
 var outDir = path.join(ROOT, "dist");
 if (!fs.existsSync(outDir)) fs.mkdirSync(outDir);
-var outFile = path.join(outDir, "app.bundle.js");
-fs.writeFileSync(outFile, bundle);
+// content hash → cache-busts the CDN on every change (the old fixed
+// `app.bundle.js?v=DEV` URL let GitHub Pages' edge serve a stale bundle, so
+// deploys didn't take effect). New content → new filename → guaranteed fresh.
+var bundleHash = crypto.createHash("sha256").update(bundle).digest("hex").slice(0, 10);
+var bundleName = "app.bundle." + bundleHash + ".js";
+// drop any prior hashed bundles so dist holds only the current one
+try {
+  fs.readdirSync(outDir).forEach(function (f) {
+    if (/^app\.bundle\.[0-9a-f]+\.js$/.test(f)) fs.unlinkSync(path.join(outDir, f));
+  });
+} catch (_) {}
+fs.writeFileSync(path.join(outDir, bundleName), bundle);
+// keep the stable name too: `npm run build` runs `node --check dist/app.bundle.js`
+// and local/dev tooling references it.
+fs.writeFileSync(path.join(outDir, "app.bundle.js"), bundle);
 
-console.log("[build] bundled " + order.length + " local modules → dist/app.bundle.js ("
+console.log("[build] bundled " + order.length + " local modules → dist/" + bundleName + " ("
   + (bundle.length / 1024).toFixed(0) + " KB)");
 
 // Phase B verify harness: emit index.bundle.html — index.html with the
@@ -98,7 +112,7 @@ var inserted = false;
 order.forEach(function (rel) {
   var esc = rel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   var re = new RegExp('[ \\t]*<script[^>]*\\bsrc="/?' + esc + '(\\?[^"]*)?"[^>]*></script>\\n?');
-  bundledHtml = bundledHtml.replace(re, inserted ? "" : '<script src="dist/app.bundle.js?v=DEV"></script>\n');
+  bundledHtml = bundledHtml.replace(re, inserted ? "" : '<script src="dist/' + bundleName + '"></script>\n');
   inserted = true;
 });
 fs.writeFileSync(path.join(ROOT, "index.bundle.html"), bundledHtml);
