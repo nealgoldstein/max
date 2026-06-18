@@ -3,6 +3,16 @@
 // index.html inline <script> (PD: monolith → module, enables type-check + ESM).
 // Loaded as a classic script at its original position (after the page body),
 // so behaviour is identical to the inline block it replaced.
+
+// ROOT GUARD: ensure the `trip` global ALWAYS exists (null until TripStore loads
+// one). Many modules + boot-path renders read the bare global `trip`; in a fresh
+// / no-trip session `window.trip` was never created, so a bare read throws
+// ReferenceError ("trip is not defined") — which halts app-main boot and leaves
+// MaxPlaceKey / _generatedCityData / the picker-map registry uninitialized,
+// cascading into the Discovery "no list / no map" crashes. Declaring it null
+// here makes every bare `trip` read resolve safely. TripStore reassigns it.
+if (typeof window !== "undefined" && typeof window.trip === "undefined") window.trip = null;
+
 function g(id){return document.getElementById(id);}
 function show(id){g(id).classList.remove("hidden");}
 function hide(id){g(id).classList.add("hidden");}
