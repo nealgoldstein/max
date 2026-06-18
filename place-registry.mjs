@@ -28,7 +28,7 @@ function _pointGeo(rec) {
   var lng = (rec && typeof rec.lng === "number") ? rec.lng : null;
   return { type: "point", lat: lat, lng: lng };
 }
-function _decisionOf(rec) {
+function _regDecisionOf(rec) {   // renamed from _decisionOf — avoid clashing with the P4.3 global accessor (trip-decision-read.mjs)
   return {
     kept: (rec._keep === true) ? true : (rec._keep === false ? false : null),
     rejected: rec._rejected === true
@@ -54,7 +54,7 @@ function buildRegistry(trip) {
         geo: _pointGeo(rec),
         role: role,
         exploredFrom: MaxDecisions.exploredFromOf(rec),
-        decision: _decisionOf(rec),
+        decision: _regDecisionOf(rec),
         // a destination Place keeps a reference to its source record, so the
         // access layer (destinationsOf) returns the SAME objects in registry
         // order — making a reader's switch from trip.destinations a no-op.
@@ -370,6 +370,7 @@ export default MaxPlaces;
   __expg._cmRejected = _cmRejected;
   __expg._decisionFromCandidate = _decisionFromCandidate;
   __expg._pointGeo = _pointGeo;
+  __expg._regDecisionOf = _regDecisionOf;
   __expg._regKey = _regKey;
   __expg.buildRegistry = buildRegistry;
   __expg.candidateMirrorCheck = candidateMirrorCheck;

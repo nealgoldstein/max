@@ -10700,54 +10700,11 @@ function _reconcileUserListedKeeps(){
   }
 }
 
-// P4.3 read accessor — DERIVE a place's keep from the projection (origin +
-// decision log), the single source. keepOf ignores kind, so this is fully
-// self-contained from the place: no section context needed. The reconcile caches
-// the identical value onto p._keep; routing reads through here lets that cache be
-// retired once every read derives. Falls back to the cached flag only if the
-// model / decision log isn't attached yet (pre-load), so it is always safe to call.
-function _keepOf(p){
-  if (!p) return false;
-  if (typeof MaxDecisions === "undefined" || !MaxDecisions || typeof MaxDecisions.keepOf !== "function") return !!p._keep;
-  var _o = (typeof window._placeOrigin === "function") ? window._placeOrigin(p) : (p._origin || "max");
-  var _d = (typeof _tb !== "undefined" && _tb && _tb._decisions && typeof _tb._decisions.get === "function") ? _tb._decisions.get(p.place) : null;
-  if (_d) return MaxDecisions.keepOf({ origin: _o }, _d);
-  // #Place D: no decision-log entry — prefer the PERSISTED decision (stored
-  // _keep) over a blind origin default. (B1.1 tried to derive from the candidate
-  // snapshot here, but the gate proved the snapshot is NOT universally complete:
-  // many loaded/seeded trips carry candidates:[] — e.g. ICELAND_RING — so
-  // candidate-derivation returns the origin default and breaks them. The _keep
-  // cache is therefore load-bearing for cache-less trips and CANNOT be retired;
-  // OBJECT-MODEL.md §7 step 3 updated accordingly.)
-  if (typeof p._keep === "boolean") return p._keep;
-  return MaxDecisions.keepOf({ origin: _o }, null);
-}
-if (typeof globalThis !== "undefined") globalThis._keepOf = _keepOf;
-
-// P4.3 read accessors for the DECISION + ROLE legs (mirrors _keepOf).
-// _decisionOf(p) — the user's decision for a place from the log (carries
-// role / hub / leg), or null. The single read path for "what did the user
-// choose here." _roleOf(p, isStay) — DERIVE the role via the projection.
-// roleOf returns decision.role for a decided place (daytrips/waysides ARE
-// decided), so kind/section only matters for the undecided stay/see default;
-// pass isStay when you have the section, omit otherwise. Both fall back to the
-// smeared signals only pre-load, so they are always safe to call.
-function _decisionOf(p){
-  if (!p || !p.place) return null;
-  if (typeof _tb === "undefined" || !_tb || !_tb._decisions || typeof _tb._decisions.get !== "function") return null;
-  return _tb._decisions.get(p.place) || null;
-}
-function _roleOf(p, isStay){
-  if (!p) return null;
-  if (typeof MaxDecisions === "undefined" || !MaxDecisions || typeof MaxDecisions.roleOf !== "function") {
-    if (p._waysideFromHub) return "onway";
-    if (p._isDayTrip) return "daytrip";
-    return isStay ? "stay" : "see";
-  }
-  var _o = (typeof window._placeOrigin === "function") ? window._placeOrigin(p) : (p._origin || "max");
-  return MaxDecisions.roleOf({ origin: _o, kind: isStay ? "destination" : "sight" }, _decisionOf(p));
-}
-if (typeof globalThis !== "undefined") { globalThis._decisionOf = _decisionOf; globalThis._roleOf = _roleOf; }
+// P4.3 read accessors (_keepOf / _decisionOf / _roleOf) were EXTRACTED into
+// trip-decision-read.js — #3 god-module decomposition, carve 1 (same strangler
+// pattern as PD.401g's discovery-adapter.js: functions unchanged, still run as
+// globals via auto-expose, only their home moved). They are read here exactly as
+// before, as runtime globals.
 
 // PD.401g: the Discovery placement adapter (_discoveryOpts,
 // _discoveryConsideredCounts, _applyDiscoveryModelToSights) was EXTRACTED
