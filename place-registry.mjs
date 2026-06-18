@@ -200,6 +200,7 @@ function _decisionFromCandidate(trip, key) {
   }
   return null;
 }
+/** @param {any} trip @param {RequiredPlace|any} rp @param {{isStay?:boolean,origin?:string}} [ctx] @returns {boolean} */
 function keepFor(trip, rp, ctx) {
   ctx = ctx || {};
   var facts = MaxDecisions.factsOf({ isStay: !!ctx.isStay, origin: ctx.origin || (rp && rp._origin) });
