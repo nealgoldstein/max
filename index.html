@@ -439,12 +439,18 @@
      route it through the same _migrate so every trip reaches the v4 subKind
      shape on load — that is the precondition for removing the remaining
      dual-shape `subKind || kind` route readers (BACKLOG task #28). -->
+<!-- Operational safety net: capture unhandled errors FIRST so boot-time
+     failures aren't silent (MaxErrors). See error-monitor.js. -->
+<script type="module" src="error-monitor.mjs?v=DEV"></script>
 <script type="module" src="util-esc.mjs?v=DEV"></script>
 <script type="module" src="migration.mjs?v=DEV"></script>
 <!-- Round HA: Phase 0 of the engine/UI split. db.js exposes window.MaxDB
      as the persistence seam. No callsites migrated yet; this just
      defines the API and verifies it loads. -->
 <script type="module" src="db.mjs?v=DEV"></script>
+<!-- Operational safety net: user-controlled trip backup/restore (MaxBackup),
+     a recovery copy independent of Turso sync. See backup.js. -->
+<script type="module" src="backup.mjs?v=DEV"></script>
 <!-- ARCHITECTURE REWRITE Phase 1: TripStore — single source of truth
      for trip state. Owns the canonical in-memory `trip` object,
      exposes named mutators, emits `tripChange` on every mutation,
