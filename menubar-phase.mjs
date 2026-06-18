@@ -75,7 +75,12 @@ function _mwOutsideClick(e){
 
 function goHome(){
   if (document.body) document.body.classList.remove("picker-active");
-  if(MaxPlaces.destinationsOf(trip).length>0&&!confirm("Return to trips? Your trip is saved."))return;
+  // Guard the bare `trip` global: goHome can fire from the background sync poll
+  // (_refreshHomeScreen) BEFORE any trip is loaded, when `trip` is undeclared —
+  // a bare read throws ReferenceError. typeof-guard it (no trip → nothing to
+  // confirm, just go home).
+  var _ghTrip = (typeof trip !== "undefined") ? trip : null;
+  if(MaxPlaces.destinationsOf(_ghTrip).length>0&&!confirm("Return to trips? Your trip is saved."))return;
   // PD.332: goHome can be invoked from INSIDE Discovery (the picker
   // header's ← Home). showHome only swaps the home/app panels — the
   // picker overlay is fullscreen and reparented to <body>, so it kept
