@@ -10712,14 +10712,20 @@ function _keepOf(p){
   var _o = (typeof window._placeOrigin === "function") ? window._placeOrigin(p) : (p._origin || "max");
   var _d = (typeof _tb !== "undefined" && _tb && _tb._decisions && typeof _tb._decisions.get === "function") ? _tb._decisions.get(p.place) : null;
   if (_d) return MaxDecisions.keepOf({ origin: _o }, _d);
-  // #Place D: no decision-log entry for this place — prefer the PERSISTED
-  // decision (the stored _keep) over a blind origin default. This makes _keepOf
-  // a safe no-op replacement for every raw `p._keep` read in EVERY context,
-  // including post-reload when the log may not have fully restored: log present
-  // → derive (proven == stored, [keep-3way] 16/16); log sparse → return the
-  // saved flag verbatim. The stored flag retires only once the log is proven
-  // complete (OBJECT-MODEL.md §7 step 3); until then _keepOf CENTRALIZES the
-  // _keep dependency in this one function instead of 49 scattered reads.
+  // #Place D B1: no decision-LOG entry — derive from the CANDIDATE SNAPSHOT
+  // (the COMPLETE source: every place has a candidate after build, and it
+  // persists with the trip), via the proven keepFor projection. This replaces
+  // the stored-_keep fallback, severing the read path's dependency on the cache
+  // so the cache can be retired. keepShadowCheck proves candidate-derivation ==
+  // stored (16/16) — so this is behavior-preserving today and cache-free.
+  try {
+    var _t = (typeof trip !== "undefined" && trip) ? trip : ((typeof window !== "undefined") ? window.trip : null);
+    if (_t && typeof MaxPlaces !== "undefined" && MaxPlaces && typeof MaxPlaces.keepFor === "function") {
+      return MaxPlaces.keepFor(_t, p, { origin: _o });
+    }
+  } catch (_) {}
+  // last-resort guard ONLY for pre-load (no trip/registry yet); retired with the
+  // cache in the final B1 slice.
   if (typeof p._keep === "boolean") return p._keep;
   return MaxDecisions.keepOf({ origin: _o }, null);
 }
