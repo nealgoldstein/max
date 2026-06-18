@@ -4915,6 +4915,12 @@ async function enhanceDiscovery(btn, opts) {
       + "Return ONLY a JSON array (no markdown):\n"
       + '[{"place":"City or Sight","country":"Country","role":"base","stayRange":"2-4 nights OR 0 nights","singleSight":false,"whyItFits":"What makes it specifically worth visiting for this traveler.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth doing here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
     var calls = [];
+    // PD.306-hardening: count LLM-call failures so a TOTAL wipeout (every call
+    // failed — e.g. a retired model, an outage) can be told apart from a genuine
+    // "succeeded, nothing new to add" (addedCount 0). Without this they look
+    // identical, and the auto-enhance one-shot stamp gets burned on a failure —
+    // permanently spending a trip's auto-enhance without ever delivering.
+    var _enhCallFailures = 0;
     calls.push(callMax([{role:"user", content:pThematic}], 2200, 60000).then(function(t){
       var cleaned = t.replace(/```json|```/g, "").trim();
       var cands;
@@ -4926,7 +4932,7 @@ async function enhanceDiscovery(btn, opts) {
       }
       cands.forEach(function(c){ c._required = false; c._requiredFor = []; });
       return cands;
-    }).catch(function(e){ console.warn("[Max enhance] pThematic failed:", e && e.message); return []; }));
+    }).catch(function(e){ console.warn("[Max enhance] pThematic failed:", e && e.message); _enhCallFailures++; return []; }));
     // PD.111 per-place enrichment — same prompt shape as PD.110.
     // PD.115: only enrich around KEPT places (no point fishing for
     // sights near a place the user already rejected).
@@ -4953,9 +4959,19 @@ async function enhanceDiscovery(btn, opts) {
         catch(_){ return []; }
         cands.forEach(function(c){ c._required = false; c._requiredFor = []; c._enrichedFrom = c.near || ""; });
         return cands;
-      }).catch(function(e){ console.warn("[Max enhance] enrich batch failed:", e && e.message); return []; }));
+      }).catch(function(e){ console.warn("[Max enhance] enrich batch failed:", e && e.message); _enhCallFailures++; return []; }));
     }
     var results = await Promise.allSettled(calls);
+    // Total LLM wipeout: every call failed. In the AUTO path (suppressToast,
+    // used by _runEnhancePhase) THROW so the orchestrator's catch leaves the
+    // trip's one-shot auto-enhance UNSTAMPED — the next build retries instead of
+    // silently spending it. Manual "✦ More like this" keeps its existing toast.
+    if (calls.length > 0 && _enhCallFailures >= calls.length) {
+      console.warn("[Max enhance] all " + calls.length + " LLM call(s) failed — enhance produced nothing.");
+      if (opts.suppressToast) {
+        throw new Error("enhance: all " + calls.length + " LLM call(s) failed");
+      }
+    }
     var fresh = [];
     results.forEach(function(r){
       if (r.status === "fulfilled" && Array.isArray(r.value)) fresh = fresh.concat(r.value);
