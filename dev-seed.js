@@ -82,8 +82,20 @@
         savedAt: new Date().toISOString()
       });
       localStorage.setItem("max-trips-index", JSON.stringify(idx));
-      console.log("[dev-seed] wrote trip", s.id, "— reloading to home");
-      location.href = "./index.html";
+      // keep the app's in-memory index in sync too (so Home lists it)
+      if (typeof window._upsertTripIndexEntry === "function") {
+        try { window._upsertTripIndexEntry(idx[0]); } catch (_) {}
+      }
+      console.log("[dev-seed] wrote trip", s.id);
+      // Open it directly via the app's own loader (same path as tapping a Home
+      // card). Falls back to a reload if localLoad isn't available.
+      if (typeof window.localLoad === "function" && window.localLoad(s.id)) {
+        console.log("[dev-seed] opened", s.id);
+        if (btn) { btn.textContent = "🌱 Seeded ✓"; btn.disabled = false; }
+      } else {
+        console.log("[dev-seed] localLoad unavailable — reloading to Home");
+        location.href = "./index.html";
+      }
     } catch (e) {
       console.error("[dev-seed] failed:", e);
       alert("Seed failed — see console: " + (e && e.message || e));
