@@ -301,6 +301,21 @@ Finishable checklist:
    through `MaxRoleWriter.set` (log-updating). The remaining `_keep` cache is a
    harmless redundant mirror. Steps 3–4 are finality/cleanliness, not bug fixes —
    undertake only if the maintenance win justifies the build-path risk.
+
+   **B1.1 RESULT (commit 679bb82, reverted 51a9a4c) — the cache is NOT
+   retirable.** Tried deriving `_keepOf` from the candidate snapshot to sever the
+   `_keep` dependency. The gate caught the flaw: the candidate snapshot is NOT
+   universally complete — many loaded/seeded trips carry `candidates: []` (e.g.
+   the ICELAND_RING fixture; older persisted trips), so candidate-derivation
+   returns the origin default and silently changes keep for those trips
+   (`role-authority` / `trip-mutators` specs failed). The keep-shadow gate missed
+   it because it only exercises the freshly-built pipeline (full candidates).
+   CONCLUSION: `_keep` is load-bearing for cache-less trips; it stays. Retiring it
+   would first require backfilling candidates on load for every trip — a separate,
+   larger project with its own risk and still no behavioral upside. **B1 is
+   considered DONE at B1.1-reverted: the read path derives where it safely can
+   (log + candidates when present), falls back to the persisted `_keep` otherwise,
+   and the drift-bug class stays closed.**
 4. **Delete the `MaxRoleWriter` mirror** (the `_keep`/`_isDayTrip` requiredPlace
    write block). Once nothing reads the cache, the mirror has nothing to keep in
    sync — divergence becomes impossible by construction, not detected.
