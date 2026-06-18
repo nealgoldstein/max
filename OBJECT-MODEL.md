@@ -285,12 +285,22 @@ Finishable checklist:
      placeActivities — a separate sub-system; route when that phase is tackled.
    - Follow-up: `togglePlaceActivity`'s per-place `set` may emit per call (extra
      renders during the batch — perf, not correctness; dedupe like resequence).
-3. **Retire the `_keep` cache.** CAVEAT to verify first: `_keepOf` falls back to
-   `!!p._keep` only when the decision log isn't attached, and returns the ORIGIN
-   DEFAULT when the log is merely sparse. Before deleting the stored flag, prove
-   the decision log (P4.5 persisted) is COMPLETE for non-default decisions across
-   publish→reload — otherwise retiring the cache would silently change keep for
-   log-missing places. The p4_4-gate reload round-trips are the start of that proof.
+3. **Retire the `_keep` cache.** *(OPTIONAL cleanup — the drift-bug class is
+   already closed without it; see note below.)* CAVEAT to verify first: `_keepOf`
+   returns the LOG value when a decision exists, falls back to `!!p._keep` only
+   when the log isn't attached, and returns the ORIGIN DEFAULT when the log is
+   merely sparse. The gap: the BUILD SEED (`app-main:8775` `_keep = !!item.checked`)
+   sets keep WITHOUT writing the log, so a max-origin place in a checked section
+   has `_keep=true` but no log entry and origin-default=false. Deleting the cache
+   (removing the `_keep` fallback) would change those. So step 3 REQUIRES first
+   routing the build seed through the log (or proving every non-default keep is
+   logged) across publish→reload. Delicate build-path change; high cost.
+
+   **Note — core goal already met.** Drift can no longer cause a wrong read:
+   live reads use `_keepOf` (log-first, ignores stale `_keep`); live writes go
+   through `MaxRoleWriter.set` (log-updating). The remaining `_keep` cache is a
+   harmless redundant mirror. Steps 3–4 are finality/cleanliness, not bug fixes —
+   undertake only if the maintenance win justifies the build-path risk.
 4. **Delete the `MaxRoleWriter` mirror** (the `_keep`/`_isDayTrip` requiredPlace
    write block). Once nothing reads the cache, the mirror has nothing to keep in
    sync — divergence becomes impossible by construction, not detected.
