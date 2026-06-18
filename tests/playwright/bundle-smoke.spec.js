@@ -30,7 +30,10 @@ test('bundle boots the app (index.bundle.html)', async ({ page }) => {
     MaxDecisions: typeof window.MaxDecisions,
     MaxMigration: typeof window.MaxMigration,
     normPlaceName: typeof window._normPlaceName,
-    loadedFromBundle: !!document.querySelector('script[src*="dist/app.bundle.js"]'),
+    // Match the content-hashed bundle name (dist/app.bundle.<hash>.js) AND the
+    // stable dist/app.bundle.js — the build emits both; index.bundle.html points
+    // at the hashed one for CDN cache-busting.
+    loadedFromBundle: !!document.querySelector('script[src*="dist/app.bundle."]'),
   }));
 
   expect(g.loadedFromBundle, 'page loaded the single bundle, not 60 tags').toBe(true);
