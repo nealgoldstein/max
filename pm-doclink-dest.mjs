@@ -341,23 +341,10 @@ function togglePlaceActivity(id){
   }
 }
 
-// Toggle a single place within an activity row. Doesn't affect other places
-// in the row. The activity's master checkbox derives from "any place kept."
-function togglePlaceInActivity(itemId, placeIdx){
-  var items = _tb.placeActivities || [];
-  var item = null;
-  for(var i=0;i<items.length;i++){ if(items[i].id === itemId){ item = items[i]; break; } }
-  if (!item || !Array.isArray(item.requiredPlaces) || !item.requiredPlaces[placeIdx]) return;
-  var p = item.requiredPlaces[placeIdx];
-  p._keep = !p._keep;
-  // Recompute activity-level derived state
-  item.checked = item.requiredPlaces.some(function(pp){ return pp && pp._keep; });
-  _renderPlaceActivityItems();
-  _updatePlaceActivitySummary();
-  if (typeof _refreshAllPlacePickerMaps === "function") _refreshAllPlacePickerMaps();
-  // Round NC.X: pan + pulse the toggled place on the picker map.
-  if (typeof _pmFocusPlace === "function" && p && p.place) _pmFocusPlace(p.place);
-}
+// (removed) togglePlaceInActivity — dead since per-activity-per-place toggling
+// was retired (app-main:13147). The live keep-toggles are togglePlaceActivity /
+// togglePlaceByPlaceMode / toggleDestKeepInSection, all routed through
+// MaxRoleWriter.set. #Place D world-class #5 (prune dead code).
 
 // Round NC.X: by-Place mode checkbox writer — flips _keep on EVERY
 // requiredPlace ref for this place across every activity. The by-Place
@@ -500,5 +487,4 @@ export {};
   __expg.toggleDestKeepInSection = toggleDestKeepInSection;
   __expg.togglePlaceActivity = togglePlaceActivity;
   __expg.togglePlaceByPlaceMode = togglePlaceByPlaceMode;
-  __expg.togglePlaceInActivity = togglePlaceInActivity;
 }
