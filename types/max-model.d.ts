@@ -51,21 +51,6 @@ declare var MaxRoute: any;
 declare var MaxSync: any;
 declare function _normPlaceName(s: any): string;
 declare function _keepOf(p: any): boolean;
-// #3 carve 2: wisp/must-do data layer moved to trip-data-layer.mjs; other
-// modules still reference these as runtime globals (via auto-expose).
-declare function _splitIntentString(s: any): any;
-declare function _wispsArray(trip: any): any;
-declare function _wispsArrayMigrated(trip: any): any;
-declare function _mdcItemsDedupe(trip: any): any;
-declare function _syncInitialIntentWisps(trip: any, newIntentText?: any): any;
-declare function _wispDedupeInitial(trip: any): any;
-declare function _wispMigrateInitialIntent(trip: any): any;
-declare function _wispMigrateLegacy(trip: any): any;
-declare function _wispAdd(trip: any, text: any): any;
-declare function _wispUnprocessed(trip: any): any;
-declare function _wispMarkProcessed(trip: any, wispIds: any, resultItemIds?: any): any;
-declare function _wispDelete(trip: any, wispId: any, alsoDeleteItems?: any): any;
-declare function _mdcItemDelete(trip: any, itemId: any): any;
 declare function autoSave(opts?: any): void;
 declare function _upsertTripIndexEntry(entry: any): any;
 declare var _generatedCityData: any;
