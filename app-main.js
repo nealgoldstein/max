@@ -4855,6 +4855,21 @@ async function _fillSelectedGaps(selections){
   }
 }
 
+// Enhance "smart steering" toggle (default ON). Gates the steer-in-words input,
+// the visible taste-read, and (next slice) recency weighting. Easily flipped:
+// _setEnhanceSteer(false) to disable, _setEnhanceSteer(true) to re-enable; the
+// Settings panel exposes a checkbox too.
+function _enhanceSteerOn() {
+  try { return localStorage.getItem("max-enhance-steer") !== "off"; } catch (_) { return true; }
+}
+function _setEnhanceSteer(on) {
+  try { localStorage.setItem("max-enhance-steer", on ? "on" : "off"); } catch (_) {}
+}
+if (typeof globalThis !== "undefined") {
+  globalThis._enhanceSteerOn = _enhanceSteerOn;
+  globalThis._setEnhanceSteer = _setEnhanceSteer;
+}
+
 async function enhanceDiscovery(btn, opts) {
   // PD.306: opts param so the auto-Enhance chain inside runCandidateSearch
   // can call us without the user-facing toast / error popup / empty-set
@@ -4939,6 +4954,12 @@ async function enhanceDiscovery(btn, opts) {
         + _enhanceThemes.join("\n- ")
         + "\nSet the \"section\" field to the chosen theme. Only if a suggestion genuinely fits none, set \"section\":\"More places to consider\".\n")
       : "";
+    // SMART STEERING (toggle): the traveler's free-text lean. No-op when off or
+    // when no steer text was provided. Injected into both prompts below.
+    var _steer = (_enhanceSteerOn() && opts.steer) ? String(opts.steer).trim().slice(0, 300) : "";
+    var steerClause = _steer
+      ? ("\nThe traveler EXPLICITLY asked you to lean toward: \"" + _steer + "\". Weight this heavily — it breaks ties and shapes the whole set.\n")
+      : "";
     // PD.115: rejection-aware prompt fragments. When the user has
     // explicitly rejected places, that's a strong negative signal —
     // the LLM should avoid suggesting things in the same pattern.
@@ -4977,6 +4998,7 @@ async function enhanceDiscovery(btn, opts) {
       + keptClause
       + rejectedClause
       + themeClause
+      + steerClause
       + "\nDo NOT repeat ANY of these places (already in the picker, kept or rejected):\n"
       + skipList + "\n\n"
       + "Add " + addCount + " MORE places to " + region + " that fit the KEPT taste signal — places a traveler with this exact pattern would also love. "
@@ -5018,6 +5040,7 @@ async function enhanceDiscovery(btn, opts) {
         + skipList + "\n"
         + rejectedClause
         + themeClause
+        + steerClause
         + "\nFor each of these " + eBatch.length + " KEPT places, suggest 1-2 NEARBY sights or activities (within ~50 km) that are NOT in the master list:\n"
         + eBatch.join("; ") + "\n\n"
         + "Each suggestion must be specific, actually nearby, NOT in the master list, and NOT a famous gateway the traveler obviously skipped on purpose. "
@@ -5033,6 +5056,19 @@ async function enhanceDiscovery(btn, opts) {
         return cands;
       }).catch(function(e){ console.warn("[Max enhance] enrich batch failed:", e && e.message); _enhCallFailures++; return []; }));
     }
+    // TRANSPARENCY (steering on): a one-sentence taste read from kept-vs-rejected
+    // (+ any steer), shown to the user so they can see Max's inference and
+    // correct it. Runs in parallel; failure is silent (display-only).
+    var _tasteReadPromise = null;
+    if (_enhanceSteerOn()) {
+      var pRead = "In ONE short sentence (max 25 words), describe the travel taste pattern implied by what this traveler KEPT vs REJECTED"
+        + (_steer ? (", plus their stated preference \"" + _steer + "\"") : "")
+        + ". Kept: " + (keptList || "(none yet)") + ". Rejected: " + (rejectedList || "(none)") + "."
+        + " Start the sentence with \"Leaning \". Reply with ONLY the sentence, no preamble.";
+      _tasteReadPromise = callMax([{ role: "user", content: pRead }], 80, 20000)
+        .then(function (t) { return String(t || "").replace(/^["']+|["']+$/g, "").trim(); })
+        .catch(function () { return ""; });
+    }
     var results = await Promise.allSettled(calls);
     // Total LLM wipeout: every call failed. In the AUTO path (suppressToast,
     // used by _runEnhancePhase) THROW so the orchestrator's catch leaves the
@@ -5043,6 +5079,12 @@ async function enhanceDiscovery(btn, opts) {
       if (opts.suppressToast) {
         throw new Error("enhance: all " + calls.length + " LLM call(s) failed");
       }
+    }
+    // Resolve the taste read (steering on) — display-only, never blocks.
+    var _tasteRead = "";
+    if (_tasteReadPromise) {
+      try { _tasteRead = await _tasteReadPromise; } catch (_) {}
+      if (_tasteRead) { try { _tb._lastTasteRead = _tasteRead; } catch (_) {} }
     }
     var fresh = [];
     results.forEach(function(r){
@@ -5226,20 +5268,17 @@ async function enhanceDiscovery(btn, opts) {
     // actually visible.
     (function _showEnhanceToast(){
       var toastMsg;
+      // Steering: lead with Max's one-line taste read so the user sees its
+      // inference (and can correct it with ✦ Tune).
+      var _readLine = (typeof _tasteRead === "string" && _tasteRead) ? (_tasteRead + "\n") : "";
       if (!addedCount) {
-        toastMsg = rejectedDisplay.length
+        toastMsg = _readLine + (rejectedDisplay.length
           ? "No new places this time — Max is out of fresh ideas given what you've kept and rejected. Try rejecting more, or accept what's there."
-          : "No new places this time — Max is out of fresh ideas for this set.";
+          : "No new places this time — Max is out of fresh ideas for this set.");
       } else {
-        var parts = [];
-        if (themeItems.length) {
-          parts.push(themeItems.length + " in “More places to consider”");
-        }
-        if (enrichItems.length) {
-          parts.push(enrichItems.length + " near " + enrichedSourcesCount + " of your existing place" + (enrichedSourcesCount === 1 ? "" : "s") + " (look for italic “✦ Max suggests near here” under each)");
-        }
-        toastMsg = "✦ Added " + addedCount + " place" + (addedCount === 1 ? "" : "s") + ": " + parts.join(" · ")
-          + ". Review them, keep what fits, reject what misses — then click ✦ More like this again to sharpen further.";
+        toastMsg = _readLine + "✦ Added " + addedCount + " place" + (addedCount === 1 ? "" : "s")
+          + " — sorted into the matching Discovery themes (dashed = Max's guess). "
+          + "Keep what fits, reject what misses, then ✦ More like this to sharpen.";
       }
       try {
         // Reuse existing toast div if still on screen.
@@ -12135,21 +12174,30 @@ function _renderPlaceActivityItems(){
     enhBtn.title = "Find more places shaped like the ones you’ve kept — and steer away from anything like what you’ve rejected. Existing picks are preserved.";
     enhBtn.onclick = function(e){
       e.stopPropagation();
-      // PD.309: route through MaxBuild.rerunEnhance so the standalone
-      // button is the ONLY by-name re-invocation of enhance, and so
-      // subscribers to enhance:start / enhance:done get notified the
-      // same way they do during a build. Falls back to direct
-      // enhanceDiscovery call if MaxBuild hasn't loaded.
+      // Smart steering (toggle ON): let the traveler optionally tell Max what to
+      // lean toward this round, in words. Blank = normal taste-driven enhance.
+      // prompt() keeps it zero-layout (no new UI to break); off → no prompt.
+      var _steerText = "";
+      try {
+        if (typeof _enhanceSteerOn === "function" && _enhanceSteerOn()) {
+          var _ans = window.prompt("✦ Lean this round toward… (optional — e.g. \"more hikes, fewer towns\"). Leave blank for Max's read of your picks.", "");
+          if (_ans === null) return;            // user cancelled — do nothing
+          _steerText = String(_ans || "").trim();
+        }
+      } catch (_) {}
+      // PD.309: route through MaxBuild.rerunEnhance so the standalone button is
+      // the ONLY by-name re-invocation of enhance, and subscribers to
+      // enhance:start / enhance:done get notified. Falls back to direct call.
       if (typeof MaxBuild !== "undefined" && MaxBuild && typeof MaxBuild.rerunEnhance === "function") {
         var origLabel = enhBtn.textContent;
         enhBtn.disabled = true;
         enhBtn.textContent = "Discovering…";
-        MaxBuild.rerunEnhance().catch(function(_){}).then(function(){
+        MaxBuild.rerunEnhance({ steer: _steerText }).catch(function(_){}).then(function(){
           enhBtn.disabled = false;
           enhBtn.textContent = origLabel;
         });
       } else if (typeof enhanceDiscovery === "function") {
-        enhanceDiscovery(enhBtn);
+        enhanceDiscovery(enhBtn, { steer: _steerText });
       }
     };
     // PD.244: prepend What's missing? + Enhance so they read as the
