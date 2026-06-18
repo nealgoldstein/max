@@ -4916,6 +4916,29 @@ async function enhanceDiscovery(btn, opts) {
     var keptList = keptDisplay.join(", ");
     var rejectedList = rejectedDisplay.join(", ");
     var listedCount = existingDisplay.length;
+    // THEME CATEGORIES — collect the trip's existing thematic Discovery sections
+    // (e.g. "Drive scenic routes", "Catch seasonal phenomena", "Unique sights")
+    // so enhance suggestions land in the SAME themes as the user's own picks,
+    // instead of two generic "More places…" / "Sights near…" buckets. Skip the
+    // overnight-stay/system sections and any prior enhance sections.
+    var _enhanceThemes = [];
+    (function () {
+      var seen = {};
+      (_tb.placeActivities || []).forEach(function (it) {
+        if (!it || it.type === "synthetic-enhance") return;
+        var s = it.section || it.name || "";
+        if (!s) return;
+        try { if (typeof window._isStaySection === "function" && window._isStaySection(s)) return; } catch (_) {}
+        if (seen[s]) return;
+        seen[s] = true;
+        _enhanceThemes.push(s);
+      });
+    })();
+    var themeClause = _enhanceThemes.length
+      ? ("\nCATEGORIZE each suggestion under ONE of the traveler's EXISTING Discovery themes (use the EXACT label, copied verbatim). Themes:\n- "
+        + _enhanceThemes.join("\n- ")
+        + "\nSet the \"section\" field to the chosen theme. Only if a suggestion genuinely fits none, set \"section\":\"More places to consider\".\n")
+      : "";
     // PD.115: rejection-aware prompt fragments. When the user has
     // explicitly rejected places, that's a strong negative signal —
     // the LLM should avoid suggesting things in the same pattern.
@@ -4953,6 +4976,7 @@ async function enhanceDiscovery(btn, opts) {
       + geoScopeHint
       + keptClause
       + rejectedClause
+      + themeClause
       + "\nDo NOT repeat ANY of these places (already in the picker, kept or rejected):\n"
       + skipList + "\n\n"
       + "Add " + addCount + " MORE places to " + region + " that fit the KEPT taste signal — places a traveler with this exact pattern would also love. "
@@ -4960,7 +4984,7 @@ async function enhanceDiscovery(btn, opts) {
       + "Mix STAY places (towns with lodging) and SINGLE-SIGHT places (waterfalls, viewpoints, ruins) freely. "
       + "BE SPECIFIC. Name the trail, the dish, the building. Never hand-wave.\n"
       + "Return ONLY a JSON array (no markdown):\n"
-      + '[{"place":"City or Sight","country":"Country","role":"base","stayRange":"2-4 nights OR 0 nights","singleSight":false,"whyItFits":"What makes it specifically worth visiting for this traveler.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth doing here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
+      + '[{"place":"City or Sight","country":"Country","section":"One of the themes above (exact label)","role":"base","stayRange":"2-4 nights OR 0 nights","singleSight":false,"whyItFits":"What makes it specifically worth visiting for this traveler.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth doing here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
     var calls = [];
     // PD.306-hardening: count LLM-call failures so a TOTAL wipeout (every call
     // failed — e.g. a retired model, an outage) can be told apart from a genuine
@@ -4993,12 +5017,13 @@ async function enhanceDiscovery(btn, opts) {
         + "The traveler has these places in their Discovery (MASTER LIST, already known — do not repeat):\n"
         + skipList + "\n"
         + rejectedClause
+        + themeClause
         + "\nFor each of these " + eBatch.length + " KEPT places, suggest 1-2 NEARBY sights or activities (within ~50 km) that are NOT in the master list:\n"
         + eBatch.join("; ") + "\n\n"
         + "Each suggestion must be specific, actually nearby, NOT in the master list, and NOT a famous gateway the traveler obviously skipped on purpose. "
         + (rejectedDisplay.length ? "Avoid anything in the same character as the rejected set. " : "")
         + "Most will be singleSight=true (waterfalls, viewpoints, ruins). Mix freely.\n"
-        + 'Return ONLY a JSON array (no markdown):\n[{"place":"Sight","country":"Country","near":"Place from batch","role":"sight","stayRange":"0 nights","singleSight":true,"whyItFits":"Specific reason.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
+        + 'Return ONLY a JSON array (no markdown):\n[{"place":"Sight","country":"Country","section":"One of the themes above (exact label)","near":"Place from batch","role":"sight","stayRange":"0 nights","singleSight":true,"whyItFits":"Specific reason.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
       calls.push(callMax([{role:"user", content:pEnrich}], 1600 + eBatch.length * 180, 50000).then(function(t){
         var cleaned = t.replace(/```json|```/g, "").trim();
         var cands;
@@ -5061,43 +5086,50 @@ async function enhanceDiscovery(btn, opts) {
     var enrichedSourcesCount = Object.keys(distinctSources).length;
     if (addedCount) {
       _tb.placeActivities = _tb.placeActivities || [];
-      if (themeItems.length) {
-        _tb.placeActivities.push({
-          id: "synth-enh-theme-" + Date.now().toString(36),
-          section: "More places to consider",
-          name: "Max-suggested additions, in the shape of your list",
-          type: "synthetic-enhance",
-          description: "Max read your existing picks as a signal of taste and added these. Check the ones that fit; ignore the rest.",
-          checked: false,
-          requiredPlaces: themeItems.map(function(c){
-            // PD.304: default overnight=false. The LLM's singleSight
-            // flag isn't a reliable stay/sight oracle (a complex
-            // sight like Skaftafell National Park is singleSight:false
-            // because it's worth multiple days of visits, NOT because
-            // the user should sleep there). The map renders overnight=
-            // true as a bed pin, which contradicts the popup's
-            // "recommended to visit" copy and confuses the user. Make
-            // these all sights by default; the user can flip via the
-            // role popover if they want one as a stay.
-            return { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: false };
-          })
+      // THEME-GROUPED bucketing: group suggestions by the section/theme the LLM
+      // assigned (validated against the trip's REAL themes), so they blend into
+      // the SAME Discovery categories as the user's own picks instead of two
+      // generic buckets. The picker buckets placeActivities by `section`, so a
+      // synthetic-enhance entry whose section matches a user theme renders UNDER
+      // that theme's header. type stays "synthetic-enhance" (preserves the
+      // one-shot guard + the dashed "Max's guess" styling).
+      var _themeSet = {};
+      _enhanceThemes.forEach(function (t) { _themeSet[t] = true; });
+      var FALLBACK_SECTION = "More places to consider";
+      var _bySection = {};
+      var _sectionOrder = [];
+      filtered.forEach(function (c) {
+        var sec = (c.section && _themeSet[c.section]) ? c.section : FALLBACK_SECTION;
+        if (!_bySection[sec]) { _bySection[sec] = []; _sectionOrder.push(sec); }
+        _bySection[sec].push(c);
+      });
+      _sectionOrder.forEach(function (sec) {
+        var rps = _bySection[sec].map(function (c) {
+          // PD.304: default overnight=false (the LLM's singleSight flag isn't a
+          // reliable stay/sight oracle); the user can flip via the role popover.
+          var rp = { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: false };
+          if (c._enrichedFrom) rp._enrichedFrom = c._enrichedFrom;
+          return rp;
         });
-      }
-      if (enrichItems.length) {
-        _tb.placeActivities.push({
-          id: "synth-enh-near-" + Date.now().toString(36),
-          section: "Sights near places you listed",
-          name: "Near-by enrichment",
-          type: "synthetic-enhance",
-          description: "Nearby sights and activities tied to the places already in your Discovery. Each one is anchored to a place you've listed.",
-          checked: false,
-          requiredPlaces: enrichItems.map(function(c){
-            // PD.304: same fix for enrichment items — overnight=false
-            // by default; flip via role popover if appropriate.
-            return { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: false, _enrichedFrom: c._enrichedFrom || "" };
-          })
+        // Merge into an existing enhance entry for this theme (so repeated passes
+        // don't pile up duplicate sections under the same theme); else create one.
+        var _existing = _tb.placeActivities.find(function (it) {
+          return it && it.type === "synthetic-enhance" && it.section === sec;
         });
-      }
+        if (_existing) {
+          _existing.requiredPlaces = (_existing.requiredPlaces || []).concat(rps);
+        } else {
+          _tb.placeActivities.push({
+            id: "synth-enh-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e5).toString(36),
+            section: sec,
+            name: "✦ Max suggestions",
+            type: "synthetic-enhance",
+            description: "Max read your existing picks as a taste signal and added these under this theme. Check the ones that fit; ignore the rest.",
+            checked: false,
+            requiredPlaces: rps
+          });
+        }
+      });
     }
     // PD.117: coord fallback for Enhance items the LLM didn't geocode.
     // Three cases:
