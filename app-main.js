@@ -4870,6 +4870,34 @@ if (typeof globalThis !== "undefined") {
   globalThis._setEnhanceSteer = _setEnhanceSteer;
 }
 
+// Compose a DEFAULT lean for the AUTO enhance pass (and the manual pass when the
+// traveler typed nothing), from the taste-relevant traveler-profile fields plus
+// their last typed steer. Logistics/personal fields are deliberately ignored.
+function _composeDefaultLean(tb) {
+  var bits = [];
+  try {
+    var P = (typeof window !== "undefined" && window.MaxDB && window.MaxDB.prefs) ? window.MaxDB.prefs : null;
+    if (P) {
+      var mob = P.get("mobility");
+      if (mob === "limited" || mob === "elderly" || mob === "mobility") bits.push("favor accessible, low-exertion sights; avoid strenuous hikes or climbs");
+      var wk = P.get("withKids");
+      if (wk === true || wk === "true" || wk === 1 || wk === "1") bits.push("family-friendly, works well with kids");
+      var diet = P.get("dietary");
+      if (typeof diet === "string" && diet.trim()) bits.push("dietary needs: " + diet.trim());
+      var avO = P.get("avoidOtherDefaults");
+      if (typeof avO === "string" && avO.trim()) bits.push("avoid: " + avO.trim());
+      var av = P.get("avoidDefaults");
+      if (av && typeof av === "object") {
+        var on = Object.keys(av).filter(function (k) { return av[k]; });
+        if (on.length) bits.push("avoid: " + on.join(", "));
+      }
+    }
+  } catch (_) {}
+  try { if (tb && tb._lastSteer) bits.push(tb._lastSteer); } catch (_) {}
+  return bits.join("; ").slice(0, 300);
+}
+if (typeof globalThis !== "undefined") globalThis._composeDefaultLean = _composeDefaultLean;
+
 async function enhanceDiscovery(btn, opts) {
   // PD.306: opts param so the auto-Enhance chain inside runCandidateSearch
   // can call us without the user-facing toast / error popup / empty-set
@@ -4956,9 +4984,19 @@ async function enhanceDiscovery(btn, opts) {
       : "";
     // SMART STEERING (toggle): the traveler's free-text lean. No-op when off or
     // when no steer text was provided. Injected into both prompts below.
-    var _steer = (_enhanceSteerOn() && opts.steer) ? String(opts.steer).trim().slice(0, 300) : "";
+    var _steer = "";
+    if (_enhanceSteerOn()) {
+      if (opts.steer && String(opts.steer).trim()) {
+        _steer = String(opts.steer).trim().slice(0, 300);
+        try { _tb._lastSteer = _steer; } catch (_) {} // remember so the AUTO pass can reuse it
+      } else {
+        // No typed steer (the auto first-build pass, or a blank manual prompt):
+        // fall back to a DEFAULT lean read from the traveler profile + last steer.
+        _steer = _composeDefaultLean(_tb);
+      }
+    }
     var steerClause = _steer
-      ? ("\nThe traveler EXPLICITLY asked you to lean toward: \"" + _steer + "\". Weight this heavily — it breaks ties and shapes the whole set.\n")
+      ? ("\nThe traveler's taste lean for this round: \"" + _steer + "\". Weight this heavily — it breaks ties and shapes the whole set.\n")
       : "";
     // PD.115: rejection-aware prompt fragments. When the user has
     // explicitly rejected places, that's a strong negative signal —
@@ -5006,7 +5044,7 @@ async function enhanceDiscovery(btn, opts) {
       + "Mix STAY places (towns with lodging) and SINGLE-SIGHT places (waterfalls, viewpoints, ruins) freely. "
       + "BE SPECIFIC. Name the trail, the dish, the building. Never hand-wave.\n"
       + "Return ONLY a JSON array (no markdown):\n"
-      + '[{"place":"City or Sight","country":"Country","section":"One of the themes above (exact label)","role":"base","stayRange":"2-4 nights OR 0 nights","singleSight":false,"whyItFits":"What makes it specifically worth visiting for this traveler.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth doing here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
+      + '[{"place":"City or Sight","country":"Country","section":"One of the themes above (exact label)","role":"base","stayRange":"2-4 nights OR 0 nights","singleSight":false,"whyItFits":"TWO short sentences: (1) SPECIFIC — what concretely makes THIS place worth visiting (name the trail/dish/view); (2) GENERAL — why it fits THIS traveler given what they kept/rejected and any stated lean.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth doing here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
     var calls = [];
     // PD.306-hardening: count LLM-call failures so a TOTAL wipeout (every call
     // failed — e.g. a retired model, an outage) can be told apart from a genuine
@@ -5046,7 +5084,7 @@ async function enhanceDiscovery(btn, opts) {
         + "Each suggestion must be specific, actually nearby, NOT in the master list, and NOT a famous gateway the traveler obviously skipped on purpose. "
         + (rejectedDisplay.length ? "Avoid anything in the same character as the rejected set. " : "")
         + "Most will be singleSight=true (waterfalls, viewpoints, ruins). Mix freely.\n"
-        + 'Return ONLY a JSON array (no markdown):\n[{"place":"Sight","country":"Country","section":"One of the themes above (exact label)","near":"Place from batch","role":"sight","stayRange":"0 nights","singleSight":true,"whyItFits":"Specific reason.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
+        + 'Return ONLY a JSON array (no markdown):\n[{"place":"Sight","country":"Country","section":"One of the themes above (exact label)","near":"Place from batch","role":"sight","stayRange":"0 nights","singleSight":true,"whyItFits":"TWO short sentences: (1) SPECIFIC — what concretely makes this nearby spot worth the detour; (2) GENERAL — why it fits this traveler\'s taste/lean.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
       calls.push(callMax([{role:"user", content:pEnrich}], 1600 + eBatch.length * 180, 50000).then(function(t){
         var cleaned = t.replace(/```json|```/g, "").trim();
         var cands;
