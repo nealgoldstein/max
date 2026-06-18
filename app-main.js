@@ -14378,12 +14378,13 @@ if (typeof globalThis !== "undefined") {
   globalThis._pmRtBindAttachmentHandlers = _pmRtBindAttachmentHandlers;
 }
 
-if (typeof globalThis !== "undefined") {
-  globalThis._pmRtCmd = _pmRtCmd;
-  globalThis._pmRtInitContent = _pmRtInitContent;
-  globalThis._pmRtFieldHtml = _pmRtFieldHtml;
-  globalThis._pmRtSetup = _pmRtSetup;
-}
+// _pmRtCmd / _pmRtInitContent / _pmRtFieldHtml / _pmRtSetup were migrated to
+// pm-richtext.mjs (which defines AND exposes them). The stale expose block that
+// lived here read those names bare — a ReferenceError in DEV, where the classic
+// app-main.js runs BEFORE the deferred pm-richtext.mjs, so the symbols don't
+// exist yet. That halted app-main boot before MaxPlaceKey (line ~16k) was
+// defined, cascading into the Discovery "no list/map" crashes. (The bundle hid
+// it: there pm-richtext is concatenated before app-main.)
 
 // Placeholder styling for empty rich-text editors.
 (function(){
@@ -15973,7 +15974,9 @@ function _dispatchRoute() {
 }
 
 if (typeof globalThis !== "undefined") {
-  globalThis._initialTripSave = _initialTripSave;
+  // _initialTripSave migrated to geography-model.mjs (defines + exposes it).
+  // Reading it bare here ReferenceError'd in dev (classic app-main before the
+  // deferred module), halting boot before MaxPlaceKey was defined.
   globalThis._dispatchRoute = _dispatchRoute;
 }
 

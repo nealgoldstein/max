@@ -17,6 +17,10 @@ cd "$(dirname "$0")/.."
 if [ -f node_modules/acorn/package.json ]; then
   node tools/auto-expose.js --check
 fi
+# Guard the DEV-only boot-halt class: app-main.js (classic, runs BEFORE deferred
+# modules in dev) must not expose a bare symbol it no longer defines — that
+# ReferenceErrors at boot while the bundle gate stays green. See tools file.
+node tools/check-classic-exposes.js
 node tests/contract-checks.js
 node tests/canonical-placeset-tests.js
 node tests/place-key-tests.js

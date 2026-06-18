@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <html>
 <head>
+<script>
+/* EARLY BOOT TRAP (classic, first thing on the page). error-monitor.mjs is a
+   deferred module — it arms AFTER the classic app-main.js script has run, so a
+   throw during app-main's top-level boot is invisible to MaxErrors. This trap
+   captures uncaught errors synchronously from the very start. Read it in the
+   console with:  window.__bootErr.join("\n")  */
+window.__bootErr = [];
+window.addEventListener("error", function (e) {
+  try { window.__bootErr.push((e.message||"") + "  @ " + (e.filename||"").split("/").pop() + ":" + (e.lineno||"") + ":" + (e.colno||"")); } catch (_) {}
+}, true);
+</script>
 <meta charset="utf-8">
 <title>Max — The Existential Traveler</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
