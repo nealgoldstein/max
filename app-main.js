@@ -301,6 +301,14 @@ function _canonArr(arr){
 }
 if (typeof globalThis !== "undefined") globalThis._canonArr = _canonArr;
 
+// SINGLE SOURCE OF TRUTH for the LLM model. Was hardcoded inline at two call
+// sites as "claude-sonnet-4-20250514", which Anthropic retired — every LLM call
+// (Discovery, Enhance, deriveUserReasons, reconciliation) failed with the
+// "model: <name>" not-found error. Keep this as the only place the model string
+// lives so the next model change is a one-line edit.
+var MAX_MODEL = "claude-sonnet-4-6";
+if (typeof globalThis !== "undefined") globalThis.MAX_MODEL = MAX_MODEL;
+
 async function callMax(messages, maxTokens, timeoutMs, opts) {
   // v345: route through MaxSync's LLM proxy when the user is signed
   // in. The server holds the Anthropic API key — testers no longer
@@ -410,7 +418,7 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
       method: "POST",
       headers: headers,
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: MAX_MODEL,
         max_tokens: maxTokens||1000,
         // Round CH: temperature=0 for deterministic output. Was unset (default 1.0),
         // which caused different night totals on every run for the same brief.
@@ -451,7 +459,7 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
           method: "POST",
           headers: directHeaders,
           body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
+            model: MAX_MODEL,
             max_tokens: maxTokens || 1000,
             temperature: systemOverride ? 0.7 : 0,
             system: systemOverride || MAX_SYSTEM,
