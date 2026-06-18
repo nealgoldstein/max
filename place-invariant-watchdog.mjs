@@ -48,6 +48,7 @@
     try {
       if (g.TripStore && typeof g.TripStore.on === "function") {
         g.TripStore.on("tripChange", check);
+        g.__invariantArmed = true;   // proof-of-arm so the gate knows the watchdog actually ran
         try { console.log("[invariant] structural watchdog armed"); } catch (_) {}
         return true;
       }

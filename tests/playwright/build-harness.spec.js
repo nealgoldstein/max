@@ -1013,4 +1013,29 @@ test.describe('Build harness — canned-LLM end-to-end', () => {
     expect(r.flipped, 'activity toggle must flip keep and survive the re-render').toBe(true);
   });
 
+  // ── #1 verification: the structural invariant watchdog GATE ────────────────
+  // After a full real build + a live activity toggle, the always-on watchdog
+  // (place-invariant-watchdog.mjs) must have ARMED and recorded ZERO violations.
+  // This turns the runtime net into a hard CI gate: any handler that corrupts the
+  // Place-model structural invariants (registry faithful union / destinations /
+  // sights projections) fails here.
+  test('GATE: structural invariant watchdog stays clean across a real build + toggle', async ({ page }) => {
+    await bootClean(page);
+    await runPipeline(page);
+    // drive a real mutation so the watchdog has something to check
+    await page.evaluate(() => {
+      var pa = (window._tb && window._tb.placeActivities) || [];
+      var isStay = (typeof window._isStaySection === 'function') ? window._isStaySection : function(){ return false; };
+      var item = pa.find((it) => it && it.type !== 'route' && !isStay(it.section) && (it.requiredPlaces || []).length);
+      if (item && typeof window.togglePlaceActivity === 'function') window.togglePlaceActivity(item.id);
+    });
+    const res = await page.evaluate(() => ({
+      armed: !!window.__invariantArmed,
+      violations: window.__invariantViolations || []
+    }));
+    console.log('[invariant-gate] armed=' + res.armed + ' violations=' + JSON.stringify(res.violations));
+    expect(res.armed, 'invariant watchdog did not arm (TripStore/MaxPlaces not wired)').toBe(true);
+    expect(res.violations, 'structural invariant violations recorded: ' + JSON.stringify(res.violations)).toEqual([]);
+  });
+
 });
