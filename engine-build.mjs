@@ -382,21 +382,12 @@ const global = /** @type {any} */ (globalThis);
     // discovery navigation" drift: a re-entry can't re-fire what's already here.
     var _hasEnhanceContent = !!(_t && Array.isArray(_t.placeActivities) && _t.placeActivities.some(
       function (it) { return it && it.type === "synthetic-enhance"; }));
-    var _destCountDbg = (function(){ try { return MaxPlaces.destinationsOf(_t).length; } catch(_) { return "ERR"; } })();
     var _alreadyBuilt = !!(_t && (
       _t._autoEnhancedAt ||
       (_t.brief && _t.brief._autoEnhancedAt) ||
       (MaxPlaces.destinationsOf(_t).length > 0) ||
       _hasEnhanceContent
     ));
-    try { console.log("[ENH-GATE] _runEnhancePhase reached — " + JSON.stringify({
-      hasTrip: !!_t,
-      autoEnhancedAt_top: !!(_t && _t._autoEnhancedAt),
-      autoEnhancedAt_brief: !!(_t && _t.brief && _t.brief._autoEnhancedAt),
-      destCount: _destCountDbg,
-      hasEnhanceContent: _hasEnhanceContent,
-      decision: _alreadyBuilt ? "SKIP (already built)" : "RUN ENHANCE"
-    })); } catch(_) {}
     if (_alreadyBuilt) {
       return { added: 0, skipped: "not-first-discovery" };
     }

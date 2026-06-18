@@ -43,6 +43,20 @@ jobs:
             ./ _site/
           # the verified bundle load path becomes the site index
           cp index.bundle.html _site/index.html
+          # VERSION STAMP — critical for cache correctness. deploy.sh does this
+          # for branch-serve, but the Pages workflow must too. Without it, every
+          # deploy ships the literal ?v=DEV / max-sw-DEV placeholders, so:
+          #   * asset URLs never change → the cache-first service worker serves
+          #     stale app-main.js (where MAX_MODEL + most logic live) forever;
+          #   * the SW CACHE name never changes → old caches are never evicted.
+          # Result: deploys silently never reach returning users. Stamping a
+          # unique value per deploy fixes both — new ?v= URLs miss the cache and
+          # fetch fresh, and the new CACHE name triggers old-cache eviction.
+          STAMP=$(date +%s)
+          echo "→ version stamp: $STAMP"
+          find _site -name '*.html' -print0 | xargs -0 sed -i "s/?v=DEV/?v=$STAMP/g"
+          sed -i "s/max-sw-DEV/max-sw-$STAMP/g" _site/sw.js
+          echo "→ sample stamped refs:"; grep -o '?v=[0-9]*' _site/index.html | head -3 || true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
