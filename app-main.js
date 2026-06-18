@@ -309,6 +309,28 @@ if (typeof globalThis !== "undefined") globalThis._canonArr = _canonArr;
 var MAX_MODEL = "claude-sonnet-4-6";
 if (typeof globalThis !== "undefined") globalThis.MAX_MODEL = MAX_MODEL;
 
+// LLM concurrency gate — caps simultaneous in-flight LLM requests. A Discovery
+// build fires a burst (~20 calls at once: description recovery, enrichment,
+// coordinates). Unthrottled over a flaky link, some connections drop ("Failed
+// to fetch") and the trip ends up with holes (missing pins/descriptions). FIFO
+// queue; paired acquire()/release() (release lives in callMax's finally).
+var _MAX_LLM_CONCURRENCY = 5;
+var _maxLlmGate = (function () {
+  var active = 0, q = [];
+  return {
+    acquire: function () {
+      return new Promise(function (res) {
+        if (active < _MAX_LLM_CONCURRENCY) { active++; res(); }
+        else q.push(res);
+      });
+    },
+    release: function () {
+      if (q.length) { var next = q.shift(); next(); } // transfer the slot to the next waiter
+      else if (active > 0) active--;
+    }
+  };
+})();
+
 async function callMax(messages, maxTokens, timeoutMs, opts) {
   // v345: route through MaxSync's LLM proxy when the user is signed
   // in. The server holds the Anthropic API key — testers no longer
@@ -399,9 +421,14 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
     _flightPromise.catch(function(){}); // no unhandled-rejection noise when nobody joined
     window._maxInFlight[cacheKey] = _flightPromise;
   }
+  // Throttle: acquire a concurrency slot before doing any network work (after
+  // the cache/flight checks above, so cache hits never consume a slot).
+  // Released in the finally at the end of this function.
+  await _maxLlmGate.acquire();
   try {
   var resp, data;
   var _llmAttempt = 0;
+  var _netAttempt = 0;
   // PD.481 (network reliability): retry loop around the LLM fetch so a
   // transient 429 (rate limit) / 529 (overloaded) backs off instead of
   // aborting Discovery/Enhance mid-plan. The in-flight/cache bookkeeping
@@ -476,6 +503,23 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
         throw fetchErr;
       }
     } else {
+      // Transient network blip (Failed to fetch / API timeout) \u2014 common when a
+      // Discovery build fires a burst of parallel calls over a flaky link. Retry
+      // with exponential backoff before giving up, so a blip self-heals instead
+      // of leaving holes (missing coordinates \u2192 no map pins; missing
+      // descriptions \u2192 bare cards). Proxy path only; the BYOK direct fallback is
+      // handled in the branch above.
+      var _netMsg = (fetchErr && fetchErr.message) || "";
+      var _netTransient = (fetchErr instanceof TypeError) ||
+        /failed to fetch|api timeout|network|load failed/i.test(_netMsg);
+      if (_netTransient && _netAttempt < 3) {
+        var _netWait = Math.min(600 * Math.pow(2, _netAttempt), 5000);
+        console.warn("[Max] LLM network error ('" + _netMsg + "') \u2014 retry " +
+          (_netAttempt + 1) + "/3 in " + _netWait + "ms");
+        await new Promise(function (_r) { setTimeout(_r, _netWait); });
+        _netAttempt++;
+        continue;
+      }
       if (!useProxy && !_apiKey && !_inIframe) {
         showApiKeyForm();
         throw new Error("API key required \u2014 enter your Anthropic API key in the form above.");
@@ -602,6 +646,9 @@ async function callMax(messages, maxTokens, timeoutMs, opts) {
     // followers get the same error instead of hanging.
     if (_flightDone) { _flightDone.rej(_flightErr); delete window._maxInFlight[cacheKey]; }
     throw _flightErr;
+  } finally {
+    // Always release the concurrency slot (success, error, or retry-exhausted).
+    _maxLlmGate.release();
   }
 }
 
