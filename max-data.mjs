@@ -296,6 +296,19 @@ const global = /** @type {any} */ (globalThis);
         toAdd.push({ place: name, lat: s.lat, lng: s.lng, _keep: false, _migratedFromSuggestion: true });
       });
     });
+    // PHASE-1 SHADOW (considered-collapse): toAdd.length is the SECOND pool's net
+    // contribution — considered places that live ONLY in dest.suggestions, not in
+    // placeActivities. If this is consistently 0 (especially right after a
+    // publish), the second pool is fully redundant with placeActivities and can
+    // be deleted; the readers can derive "considered" from placeActivities alone.
+    // Pure observation — no behavior change. Remove after the collapse lands.
+    try {
+      if (toAdd.length) console.log("[CONSIDERED-SHADOW] fold added " + toAdd.length +
+        " considered place(s) present ONLY in dest.suggestions (not placeActivities): " +
+        toAdd.slice(0, 12).map(function (x) { return x.place; }).join(", ") +
+        (toAdd.length > 12 ? " …" : ""));
+      else console.log("[CONSIDERED-SHADOW] fold added 0 — placeActivities already contains every considered place (second pool is redundant here).");
+    } catch (_) {}
     if (!toAdd.length) return { added: 0, placeActivities: orig };
     // Find or create the catch-all item.
     var item = null;
