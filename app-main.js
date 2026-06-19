@@ -4855,49 +4855,6 @@ async function _fillSelectedGaps(selections){
   }
 }
 
-// Enhance "smart steering" toggle (default ON). Gates the steer-in-words input,
-// the visible taste-read, and (next slice) recency weighting. Easily flipped:
-// _setEnhanceSteer(false) to disable, _setEnhanceSteer(true) to re-enable; the
-// Settings panel exposes a checkbox too.
-function _enhanceSteerOn() {
-  try { return localStorage.getItem("max-enhance-steer") !== "off"; } catch (_) { return true; }
-}
-function _setEnhanceSteer(on) {
-  try { localStorage.setItem("max-enhance-steer", on ? "on" : "off"); } catch (_) {}
-}
-if (typeof globalThis !== "undefined") {
-  globalThis._enhanceSteerOn = _enhanceSteerOn;
-  globalThis._setEnhanceSteer = _setEnhanceSteer;
-}
-
-// Compose a DEFAULT lean for the AUTO enhance pass (and the manual pass when the
-// traveler typed nothing), from the taste-relevant traveler-profile fields plus
-// their last typed steer. Logistics/personal fields are deliberately ignored.
-function _composeDefaultLean(tb) {
-  var bits = [];
-  try {
-    var P = (typeof window !== "undefined" && window.MaxDB && window.MaxDB.prefs) ? window.MaxDB.prefs : null;
-    if (P) {
-      var mob = P.get("mobility");
-      if (mob === "limited" || mob === "elderly" || mob === "mobility") bits.push("favor accessible, low-exertion sights; avoid strenuous hikes or climbs");
-      var wk = P.get("withKids");
-      if (wk === true || wk === "true" || wk === 1 || wk === "1") bits.push("family-friendly, works well with kids");
-      var diet = P.get("dietary");
-      if (typeof diet === "string" && diet.trim()) bits.push("dietary needs: " + diet.trim());
-      var avO = P.get("avoidOtherDefaults");
-      if (typeof avO === "string" && avO.trim()) bits.push("avoid: " + avO.trim());
-      var av = P.get("avoidDefaults");
-      if (av && typeof av === "object") {
-        var on = Object.keys(av).filter(function (k) { return av[k]; });
-        if (on.length) bits.push("avoid: " + on.join(", "));
-      }
-    }
-  } catch (_) {}
-  try { if (tb && tb._lastSteer) bits.push(tb._lastSteer); } catch (_) {}
-  return bits.join("; ").slice(0, 300);
-}
-if (typeof globalThis !== "undefined") globalThis._composeDefaultLean = _composeDefaultLean;
-
 async function enhanceDiscovery(btn, opts) {
   // PD.306: opts param so the auto-Enhance chain inside runCandidateSearch
   // can call us without the user-facing toast / error popup / empty-set
@@ -4959,45 +4916,6 @@ async function enhanceDiscovery(btn, opts) {
     var keptList = keptDisplay.join(", ");
     var rejectedList = rejectedDisplay.join(", ");
     var listedCount = existingDisplay.length;
-    // THEME CATEGORIES — collect the trip's existing thematic Discovery sections
-    // (e.g. "Drive scenic routes", "Catch seasonal phenomena", "Unique sights")
-    // so enhance suggestions land in the SAME themes as the user's own picks,
-    // instead of two generic "More places…" / "Sights near…" buckets. Skip the
-    // overnight-stay/system sections and any prior enhance sections.
-    var _enhanceThemes = [];
-    (function () {
-      var seen = {};
-      (_tb.placeActivities || []).forEach(function (it) {
-        if (!it || it.type === "synthetic-enhance") return;
-        var s = it.section || it.name || "";
-        if (!s) return;
-        try { if (typeof window._isStaySection === "function" && window._isStaySection(s)) return; } catch (_) {}
-        if (seen[s]) return;
-        seen[s] = true;
-        _enhanceThemes.push(s);
-      });
-    })();
-    var themeClause = _enhanceThemes.length
-      ? ("\nCATEGORIZE each suggestion under ONE of the traveler's EXISTING Discovery themes (use the EXACT label, copied verbatim). Themes:\n- "
-        + _enhanceThemes.join("\n- ")
-        + "\nSet the \"section\" field to the chosen theme. Only if a suggestion genuinely fits none, set \"section\":\"More places to consider\".\n")
-      : "";
-    // SMART STEERING (toggle): the traveler's free-text lean. No-op when off or
-    // when no steer text was provided. Injected into both prompts below.
-    var _steer = "";
-    if (_enhanceSteerOn()) {
-      if (opts.steer && String(opts.steer).trim()) {
-        _steer = String(opts.steer).trim().slice(0, 300);
-        try { _tb._lastSteer = _steer; } catch (_) {} // remember so the AUTO pass can reuse it
-      } else {
-        // No typed steer (the auto first-build pass, or a blank manual prompt):
-        // fall back to a DEFAULT lean read from the traveler profile + last steer.
-        _steer = _composeDefaultLean(_tb);
-      }
-    }
-    var steerClause = _steer
-      ? ("\nThe traveler's taste lean for this round: \"" + _steer + "\". Weight this heavily — it breaks ties and shapes the whole set.\n")
-      : "";
     // PD.115: rejection-aware prompt fragments. When the user has
     // explicitly rejected places, that's a strong negative signal —
     // the LLM should avoid suggesting things in the same pattern.
@@ -5035,8 +4953,6 @@ async function enhanceDiscovery(btn, opts) {
       + geoScopeHint
       + keptClause
       + rejectedClause
-      + themeClause
-      + steerClause
       + "\nDo NOT repeat ANY of these places (already in the picker, kept or rejected):\n"
       + skipList + "\n\n"
       + "Add " + addCount + " MORE places to " + region + " that fit the KEPT taste signal — places a traveler with this exact pattern would also love. "
@@ -5044,7 +4960,7 @@ async function enhanceDiscovery(btn, opts) {
       + "Mix STAY places (towns with lodging) and SINGLE-SIGHT places (waterfalls, viewpoints, ruins) freely. "
       + "BE SPECIFIC. Name the trail, the dish, the building. Never hand-wave.\n"
       + "Return ONLY a JSON array (no markdown):\n"
-      + '[{"place":"City or Sight","country":"Country","section":"One of the themes above (exact label)","role":"base","stayRange":"2-4 nights OR 0 nights","singleSight":false,"whyItFits":"TWO short sentences: (1) SPECIFIC — what concretely makes THIS place worth visiting (name the trail/dish/view); (2) GENERAL — why it fits THIS traveler given what they kept/rejected and any stated lean.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth doing here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
+      + '[{"place":"City or Sight","country":"Country","role":"base","stayRange":"2-4 nights OR 0 nights","singleSight":false,"whyItFits":"What makes it specifically worth visiting for this traveler.","tradeoffs":"One honest downside.","tags":["tag1"],"otherAttractions":"2-3 other things worth doing here.","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
     var calls = [];
     // PD.306-hardening: count LLM-call failures so a TOTAL wipeout (every call
     // failed — e.g. a retired model, an outage) can be told apart from a genuine
@@ -5077,14 +4993,12 @@ async function enhanceDiscovery(btn, opts) {
         + "The traveler has these places in their Discovery (MASTER LIST, already known — do not repeat):\n"
         + skipList + "\n"
         + rejectedClause
-        + themeClause
-        + steerClause
         + "\nFor each of these " + eBatch.length + " KEPT places, suggest 1-2 NEARBY sights or activities (within ~50 km) that are NOT in the master list:\n"
         + eBatch.join("; ") + "\n\n"
         + "Each suggestion must be specific, actually nearby, NOT in the master list, and NOT a famous gateway the traveler obviously skipped on purpose. "
         + (rejectedDisplay.length ? "Avoid anything in the same character as the rejected set. " : "")
         + "Most will be singleSight=true (waterfalls, viewpoints, ruins). Mix freely.\n"
-        + 'Return ONLY a JSON array (no markdown):\n[{"place":"Sight","country":"Country","section":"One of the themes above (exact label)","near":"Place from batch","role":"sight","stayRange":"0 nights","singleSight":true,"whyItFits":"TWO short sentences: (1) SPECIFIC — what concretely makes this nearby spot worth the detour; (2) GENERAL — why it fits this traveler\'s taste/lean.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
+        + 'Return ONLY a JSON array (no markdown):\n[{"place":"Sight","country":"Country","near":"Place from batch","role":"sight","stayRange":"0 nights","singleSight":true,"whyItFits":"Specific reason.","tradeoffs":"One downside.","tags":["tag1"],"otherAttractions":"","widelyRecommended":false,"lat":0.0,"lng":0.0}]';
       calls.push(callMax([{role:"user", content:pEnrich}], 1600 + eBatch.length * 180, 50000).then(function(t){
         var cleaned = t.replace(/```json|```/g, "").trim();
         var cands;
@@ -5093,19 +5007,6 @@ async function enhanceDiscovery(btn, opts) {
         cands.forEach(function(c){ c._required = false; c._requiredFor = []; c._enrichedFrom = c.near || ""; });
         return cands;
       }).catch(function(e){ console.warn("[Max enhance] enrich batch failed:", e && e.message); _enhCallFailures++; return []; }));
-    }
-    // TRANSPARENCY (steering on): a one-sentence taste read from kept-vs-rejected
-    // (+ any steer), shown to the user so they can see Max's inference and
-    // correct it. Runs in parallel; failure is silent (display-only).
-    var _tasteReadPromise = null;
-    if (_enhanceSteerOn()) {
-      var pRead = "In ONE short sentence (max 25 words), describe the travel taste pattern implied by what this traveler KEPT vs REJECTED"
-        + (_steer ? (", plus their stated preference \"" + _steer + "\"") : "")
-        + ". Kept: " + (keptList || "(none yet)") + ". Rejected: " + (rejectedList || "(none)") + "."
-        + " Start the sentence with \"Leaning \". Reply with ONLY the sentence, no preamble.";
-      _tasteReadPromise = callMax([{ role: "user", content: pRead }], 80, 20000)
-        .then(function (t) { return String(t || "").replace(/^["']+|["']+$/g, "").trim(); })
-        .catch(function () { return ""; });
     }
     var results = await Promise.allSettled(calls);
     // Total LLM wipeout: every call failed. In the AUTO path (suppressToast,
@@ -5117,12 +5018,6 @@ async function enhanceDiscovery(btn, opts) {
       if (opts.suppressToast) {
         throw new Error("enhance: all " + calls.length + " LLM call(s) failed");
       }
-    }
-    // Resolve the taste read (steering on) — display-only, never blocks.
-    var _tasteRead = "";
-    if (_tasteReadPromise) {
-      try { _tasteRead = await _tasteReadPromise; } catch (_) {}
-      if (_tasteRead) { try { _tb._lastTasteRead = _tasteRead; } catch (_) {} }
     }
     var fresh = [];
     results.forEach(function(r){
@@ -5166,50 +5061,43 @@ async function enhanceDiscovery(btn, opts) {
     var enrichedSourcesCount = Object.keys(distinctSources).length;
     if (addedCount) {
       _tb.placeActivities = _tb.placeActivities || [];
-      // THEME-GROUPED bucketing: group suggestions by the section/theme the LLM
-      // assigned (validated against the trip's REAL themes), so they blend into
-      // the SAME Discovery categories as the user's own picks instead of two
-      // generic buckets. The picker buckets placeActivities by `section`, so a
-      // synthetic-enhance entry whose section matches a user theme renders UNDER
-      // that theme's header. type stays "synthetic-enhance" (preserves the
-      // one-shot guard + the dashed "Max's guess" styling).
-      var _themeSet = {};
-      _enhanceThemes.forEach(function (t) { _themeSet[t] = true; });
-      var FALLBACK_SECTION = "More places to consider";
-      var _bySection = {};
-      var _sectionOrder = [];
-      filtered.forEach(function (c) {
-        var sec = (c.section && _themeSet[c.section]) ? c.section : FALLBACK_SECTION;
-        if (!_bySection[sec]) { _bySection[sec] = []; _sectionOrder.push(sec); }
-        _bySection[sec].push(c);
-      });
-      _sectionOrder.forEach(function (sec) {
-        var rps = _bySection[sec].map(function (c) {
-          // PD.304: default overnight=false (the LLM's singleSight flag isn't a
-          // reliable stay/sight oracle); the user can flip via the role popover.
-          var rp = { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: false };
-          if (c._enrichedFrom) rp._enrichedFrom = c._enrichedFrom;
-          return rp;
+      if (themeItems.length) {
+        _tb.placeActivities.push({
+          id: "synth-enh-theme-" + Date.now().toString(36),
+          section: "More places to consider",
+          name: "Max-suggested additions, in the shape of your list",
+          type: "synthetic-enhance",
+          description: "Max read your existing picks as a signal of taste and added these. Check the ones that fit; ignore the rest.",
+          checked: false,
+          requiredPlaces: themeItems.map(function(c){
+            // PD.304: default overnight=false. The LLM's singleSight
+            // flag isn't a reliable stay/sight oracle (a complex
+            // sight like Skaftafell National Park is singleSight:false
+            // because it's worth multiple days of visits, NOT because
+            // the user should sleep there). The map renders overnight=
+            // true as a bed pin, which contradicts the popup's
+            // "recommended to visit" copy and confuses the user. Make
+            // these all sights by default; the user can flip via the
+            // role popover if they want one as a stay.
+            return { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: false };
+          })
         });
-        // Merge into an existing enhance entry for this theme (so repeated passes
-        // don't pile up duplicate sections under the same theme); else create one.
-        var _existing = _tb.placeActivities.find(function (it) {
-          return it && it.type === "synthetic-enhance" && it.section === sec;
+      }
+      if (enrichItems.length) {
+        _tb.placeActivities.push({
+          id: "synth-enh-near-" + Date.now().toString(36),
+          section: "Sights near places you listed",
+          name: "Near-by enrichment",
+          type: "synthetic-enhance",
+          description: "Nearby sights and activities tied to the places already in your Discovery. Each one is anchored to a place you've listed.",
+          checked: false,
+          requiredPlaces: enrichItems.map(function(c){
+            // PD.304: same fix for enrichment items — overnight=false
+            // by default; flip via role popover if appropriate.
+            return { place: c.place, country: c.country || "", lat: c.lat || null, lng: c.lng || null, _keep: false, overnight: false, _enrichedFrom: c._enrichedFrom || "" };
+          })
         });
-        if (_existing) {
-          _existing.requiredPlaces = (_existing.requiredPlaces || []).concat(rps);
-        } else {
-          _tb.placeActivities.push({
-            id: "synth-enh-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e5).toString(36),
-            section: sec,
-            name: "✦ Max suggestions",
-            type: "synthetic-enhance",
-            description: "Max read your existing picks as a taste signal and added these under this theme. Check the ones that fit; ignore the rest.",
-            checked: false,
-            requiredPlaces: rps
-          });
-        }
-      });
+      }
     }
     // PD.117: coord fallback for Enhance items the LLM didn't geocode.
     // Three cases:
@@ -5306,17 +5194,20 @@ async function enhanceDiscovery(btn, opts) {
     // actually visible.
     (function _showEnhanceToast(){
       var toastMsg;
-      // Steering: lead with Max's one-line taste read so the user sees its
-      // inference (and can correct it with ✦ Tune).
-      var _readLine = (typeof _tasteRead === "string" && _tasteRead) ? (_tasteRead + "\n") : "";
       if (!addedCount) {
-        toastMsg = _readLine + (rejectedDisplay.length
+        toastMsg = rejectedDisplay.length
           ? "No new places this time — Max is out of fresh ideas given what you've kept and rejected. Try rejecting more, or accept what's there."
-          : "No new places this time — Max is out of fresh ideas for this set.");
+          : "No new places this time — Max is out of fresh ideas for this set.";
       } else {
-        toastMsg = _readLine + "✦ Added " + addedCount + " place" + (addedCount === 1 ? "" : "s")
-          + " — sorted into the matching Discovery themes (dashed = Max's guess). "
-          + "Keep what fits, reject what misses, then ✦ More like this to sharpen.";
+        var parts = [];
+        if (themeItems.length) {
+          parts.push(themeItems.length + " in “More places to consider”");
+        }
+        if (enrichItems.length) {
+          parts.push(enrichItems.length + " near " + enrichedSourcesCount + " of your existing place" + (enrichedSourcesCount === 1 ? "" : "s") + " (look for italic “✦ Max suggests near here” under each)");
+        }
+        toastMsg = "✦ Added " + addedCount + " place" + (addedCount === 1 ? "" : "s") + ": " + parts.join(" · ")
+          + ". Review them, keep what fits, reject what misses — then click ✦ More like this again to sharpen further.";
       }
       try {
         // Reuse existing toast div if still on screen.
@@ -12212,30 +12103,21 @@ function _renderPlaceActivityItems(){
     enhBtn.title = "Find more places shaped like the ones you’ve kept — and steer away from anything like what you’ve rejected. Existing picks are preserved.";
     enhBtn.onclick = function(e){
       e.stopPropagation();
-      // Smart steering (toggle ON): let the traveler optionally tell Max what to
-      // lean toward this round, in words. Blank = normal taste-driven enhance.
-      // prompt() keeps it zero-layout (no new UI to break); off → no prompt.
-      var _steerText = "";
-      try {
-        if (typeof _enhanceSteerOn === "function" && _enhanceSteerOn()) {
-          var _ans = window.prompt("✦ Lean this round toward… (optional — e.g. \"more hikes, fewer towns\"). Leave blank for Max's read of your picks.", "");
-          if (_ans === null) return;            // user cancelled — do nothing
-          _steerText = String(_ans || "").trim();
-        }
-      } catch (_) {}
-      // PD.309: route through MaxBuild.rerunEnhance so the standalone button is
-      // the ONLY by-name re-invocation of enhance, and subscribers to
-      // enhance:start / enhance:done get notified. Falls back to direct call.
+      // PD.309: route through MaxBuild.rerunEnhance so the standalone
+      // button is the ONLY by-name re-invocation of enhance, and so
+      // subscribers to enhance:start / enhance:done get notified the
+      // same way they do during a build. Falls back to direct
+      // enhanceDiscovery call if MaxBuild hasn't loaded.
       if (typeof MaxBuild !== "undefined" && MaxBuild && typeof MaxBuild.rerunEnhance === "function") {
         var origLabel = enhBtn.textContent;
         enhBtn.disabled = true;
         enhBtn.textContent = "Discovering…";
-        MaxBuild.rerunEnhance({ steer: _steerText }).catch(function(_){}).then(function(){
+        MaxBuild.rerunEnhance().catch(function(_){}).then(function(){
           enhBtn.disabled = false;
           enhBtn.textContent = origLabel;
         });
       } else if (typeof enhanceDiscovery === "function") {
-        enhanceDiscovery(enhBtn, { steer: _steerText });
+        enhanceDiscovery(enhBtn);
       }
     };
     // PD.244: prepend What's missing? + Enhance so they read as the

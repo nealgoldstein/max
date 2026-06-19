@@ -429,15 +429,13 @@ const global = /** @type {any} */ (globalThis);
   // UI can react. Unlike the auto-Enhance pass inside findCandidates,
   // this one emits its own start event so subscribers can distinguish
   // "build-time enhance" vs "manual enhance" if they want.
-  async function rerunEnhance(opts) {
-    opts = opts || {};
+  async function rerunEnhance() {
     emit("enhance:start");
     try {
       var added = await global.enhanceDiscovery(null, {
         suppressToast: false,    // manual click → show the toast
         suppressMaxAlert: false, // manual click → show errors
-        silentNoOp: false,       // manual click → tell user nothing to enhance
-        steer: opts.steer || ""  // smart-steering: optional free-text lean
+        silentNoOp: false        // manual click → tell user nothing to enhance
       });
       emit("enhance:done", { added: added || 0 });
       return { added: added || 0 };

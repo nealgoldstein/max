@@ -395,28 +395,14 @@ function _removeSightById(dest, sightId) {
 
 // PD.269: considered sights — user unchecked them in Discovery but
 // didn't reject. Render as grey "+ Add" rows. _addConsideredSight is
-// idempotent — keyed by the ALIAS-AWARE canonical key (the SAME key every
-// reader/fold uses), not a plain lowercased name. The old name-only key let
-// "Gullfoss" and "Gullfoss, Iceland" (and coordinate variants the LLM emits)
-// survive as DISTINCT considered entries, so this pool grew on every publish /
-// Discovery↔trip round-trip — the root of the runaway "considered" count. The
-// canonical key collapses those variants, so re-adding an existing place is a
-// true no-op.
-function _ckConsidered(s) {
-  var nm = (s && (s.n || s.name || s.place)) || "";
-  if (!nm) return "";
-  var g = /** @type {any} */ (typeof globalThis !== "undefined" ? globalThis : {});
-  if (g.PlaceKey && typeof g.PlaceKey.resolve === "function") return g.PlaceKey.resolve(nm);
-  if (typeof g._normPlaceName === "function") return g._normPlaceName(nm);
-  return String(nm).toLowerCase().trim();
-}
+// idempotent (matches by lowercased n).
 function _addConsideredSight(dest, sight) {
   if (!dest || !sight) return;
   _initSightSources(dest);
-  var key = _ckConsidered(sight);
+  var key = (sight.n || "").toLowerCase();
   if (!key) return;
   var existingIdx = dest._sightSources.considered.findIndex(function(s) {
-    return _ckConsidered(s) === key;
+    return s && s.n && s.n.toLowerCase() === key;
   });
   var clone = Object.assign({}, sight, { _considered: true, _keep: false });
   if (existingIdx >= 0) {
@@ -1134,7 +1120,6 @@ export {};
   __expg._addUserListedSight = _addUserListedSight;
   __expg._autoSeedIconicSightsToDays = _autoSeedIconicSightsToDays;
   __expg._buildRejectedTokenSets = _buildRejectedTokenSets;
-  __expg._ckConsidered = _ckConsidered;
   __expg._initSightSources = _initSightSources;
   __expg._markNominatimBlocked = _markNominatimBlocked;
   __expg._nominatimBlocked = _nominatimBlocked;
